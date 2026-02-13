@@ -608,6 +608,11 @@ export default function BudgetTrackerV2() {
               <button onClick={() => setDk(false)} style={{ ...btn(!dk?t.ac:t.al), flex:1, color:!dk?"#fff":t.tx, border:"1px solid "+(!dk?t.ac:t.bd) }}>☀️ Light</button>
             </div>
 
+            <div style={{ padding:"14px 16px", borderRadius:14, background:t.ac+"12", border:"1px solid "+t.ac+"30", marginBottom:20 }}>
+              <div style={{ fontSize:13, fontWeight:600, color:t.ac, marginBottom:4 }}>📱 Data stored on this device</div>
+              <div style={{ fontSize:12, color:t.sc, lineHeight:1.5 }}>Your data is saved locally on this device. Clearing browser data will erase it. Cloud sync coming soon!</div>
+            </div>
+
             <div style={{ fontSize:14, fontWeight:600, color:t.rd, marginBottom:10, textTransform:"uppercase", letterSpacing:1 }}>Danger Zone</div>
             <button style={{ ...btn(t.rd), marginBottom:10 }} onClick={() => { setExps([]); setAlerts([]); }}>🗑️ Reset All Data</button>
             <button style={{ ...btn(t.al), color:t.tx, border:"1px solid "+t.bd }} onClick={() => { setOnboarded(false); setObStep(0); setExps([]); setAlerts([]); }}>🔄 Start Fresh</button>
