@@ -86,8 +86,6 @@ export default function BudgetTrackerV2() {
   const [listening, setListening] = useState(false);
   const recRef = useRef(null);
   const [rcImg, setRcImg] = useState(null);
-  const [scanning, setScanning] = useState(false);
-  const [scanErr, setScanErr] = useState("");
   const fileRef = useRef(null);
   const camRef = useRef(null);
   const [cTab, setCTab] = useState("category");
@@ -184,39 +182,15 @@ export default function BudgetTrackerV2() {
     r.start();
   };
 
-  // Receipt
+  // Receipt photo (reference only)
   const onReceipt = ev => {
     const f = ev.target.files?.[0]; if (!f) return;
     const r = new FileReader();
-    r.onload = e => { setRcImg(e.target.result); doScan(e.target.result.split(",")[1], f.type); };
+    r.onload = e => { setRcImg(e.target.result); };
     r.readAsDataURL(f);
   };
 
-  const doScan = async (b64, mtype) => {
-    setScanning(true); setScanErr("");
-    try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: [
-          { type: "image", source: { type: "base64", media_type: mtype || "image/jpeg", data: b64 } },
-          { type: "text", text: "Analyze receipt. Return ONLY JSON: {\"total\":0,\"currency\":\"USD\",\"description\":\"brief\",\"category\":\"" + cats.map(c=>c.name).join("|") + "\"}" }
-        ] }] })
-      });
-      if (!res.ok) { setScanErr("OCR unavailable — enter details manually."); setScanning(false); return; }
-      const data = await res.json();
-      if (data.error) { setScanErr("OCR unavailable — enter details manually."); setScanning(false); return; }
-      const txt = (data.content || []).map(i => i.text || "").join("");
-      const clean = txt.replace(/```json|```/g, "").trim();
-      const p = JSON.parse(clean);
-      if (p.total) setEAmt(String(p.total));
-      if (p.description) setEDesc(p.description);
-      if (p.category && cats.find(c => c.name === p.category)) setECat(p.category);
-      if (p.currency) { const m = CURRENCIES.find(c => c.code === p.currency.toUpperCase()); if (m) setECurr(m.code); }
-    } catch (err) { setScanErr("OCR unavailable — enter details manually."); }
-    setScanning(false);
-  };
-
-  const clrReceipt = () => { setRcImg(null); setScanErr(""); if (fileRef.current) fileRef.current.value=""; if (camRef.current) camRef.current.value=""; };
+  const clrReceipt = () => { setRcImg(null); if (fileRef.current) fileRef.current.value=""; if (camRef.current) camRef.current.value=""; };
 
   const addExpense = () => {
     const a = parseFloat(eAmt); if (!a || !eCat) return;
@@ -659,23 +633,18 @@ export default function BudgetTrackerV2() {
             </div>
             <input type="file" accept="image/*" capture="environment" ref={camRef} style={{ display:"none" }} onChange={onReceipt} />
             <input type="file" accept="image/*" ref={fileRef} style={{ display:"none" }} onChange={onReceipt} />
-            <div style={{ textAlign:"center", fontSize:12, color:t.sc, marginBottom:14 }}>{listening ? "🔴 Listening..." : scanning ? "🔍 Scanning..." : "Tap voice, camera, or gallery"}</div>
+            <div style={{ textAlign:"center", fontSize:12, color:t.sc, marginBottom:14 }}>{listening ? "🔴 Listening..." : "Tap voice, or snap a receipt for reference"}</div>
 
             {rcImg && (
               <div style={{ marginBottom:14, position:"relative" }}>
                 <div style={{ borderRadius:14, overflow:"hidden", border:"1px solid "+t.bd }}>
                   <img src={rcImg} alt="Receipt" style={{ width:"100%", maxHeight:180, objectFit:"cover", display:"block" }} />
-                  {scanning && (
-                    <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:8, borderRadius:14 }}>
-                      <div style={{ width:28, height:28, border:"3px solid "+t.ac, borderTopColor:"transparent", borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />
-                      <span style={{ color:"#fff", fontSize:13 }}>Analyzing...</span>
-                    </div>
-                  )}
                 </div>
+                <div style={{ textAlign:"center", fontSize:11, color:t.sc, marginTop:6 }}>📎 Receipt attached — enter details below</div>
+                <div style={{ textAlign:"center", fontSize:11, color:t.ac, marginTop:4, cursor:"pointer" }}>💎 Upgrade to Pro for auto receipt scanning</div>
                 <button onClick={clrReceipt} style={{ position:"absolute", top:8, right:8, width:26, height:26, borderRadius:"50%", background:"rgba(0,0,0,0.7)", color:"#fff", border:"none", cursor:"pointer", fontSize:13, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
               </div>
             )}
-            {scanErr && <div style={{ padding:"10px 14px", borderRadius:10, background:t.rd+"15", color:t.rd, fontSize:13, marginBottom:14, textAlign:"center" }}>{scanErr}</div>}
 
             <div style={{ display:"flex", gap:10, marginBottom:12 }}>
               <input style={{ ...inp, flex:1 }} type="number" placeholder="Amount" value={eAmt} onChange={e => setEAmt(e.target.value)} />
