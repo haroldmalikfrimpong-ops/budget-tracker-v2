@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 
 const CURRENCIES = [
   { code: "USD", symbol: "$", name: "US Dollar" },
@@ -92,6 +92,38 @@ export default function BudgetTrackerV2() {
   const camRef = useRef(null);
   const [cTab, setCTab] = useState("category");
 
+  // Load from localStorage on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("btv2");
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (s.onboarded) setOnboarded(true);
+        if (s.bCurr) { setBCurr(s.bCurr); setECurr(s.bCurr); }
+        if (s.cats) setCats(s.cats);
+        if (s.budget) setBudget(s.budget);
+        if (s.uName) setUName(s.uName);
+        if (s.exps) setExps(s.exps);
+        if (s.dk !== undefined) setDk(s.dk);
+        if (s.warnAt) setWarnAt(s.warnAt);
+        if (s.alertAt) setAlertAt(s.alertAt);
+        if (s.notifOn) setNotifOn(s.notifOn);
+        if (s.dailyRem) setDailyRem(s.dailyRem);
+        if (s.alerts) setAlerts(s.alerts);
+      }
+    } catch (e) { console.log("Load error", e); }
+  }, []);
+
+  // Save to localStorage on every change
+  useEffect(() => {
+    if (!onboarded) return;
+    try {
+      localStorage.setItem("btv2", JSON.stringify({
+        onboarded, bCurr, cats, budget, uName, exps, dk, warnAt, alertAt, notifOn, dailyRem, alerts
+      }));
+    } catch (e) { console.log("Save error", e); }
+  }, [onboarded, bCurr, cats, budget, uName, exps, dk, warnAt, alertAt, notifOn, dailyRem, alerts]);
+
   // Theme
   const t = dk
     ? { bg:"#0a0a0f",cd:"#13131a",al:"#1a1a24",bd:"#252530",tx:"#f0f0f5",sc:"#8888a0",ac:"#6C63FF",gl:"rgba(108,99,255,0.15)",rd:"#ff6b6b",gn:"#4ecdc4",wn:"#f5af19",ip:"#1a1a24" }
@@ -112,34 +144,43 @@ export default function BudgetTrackerV2() {
   const catTotals = moExps.reduce((a, e) => { a[e.category] = (a[e.category] || 0) + e.convAmt; return a; }, {});
 
   // Voice
-  const startListen = useCallback(() => {
+  const startListen = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { alert("Voice not supported. Try Chrome!"); return; }
+    if (!SR) { alert("Voice not supported. Try Chrome on Android, or Safari 14.1+ on iPhone!"); return; }
     const r = new SR();
-    r.continuous = false; r.interimResults = false; r.lang = "en-US";
+    r.continuous = false;
+    r.interimResults = false;
+    r.lang = "en-US";
     r.onstart = () => setListening(true);
-    r.onresult = ev => { parseVoice(ev.results[0][0].transcript.toLowerCase()); setListening(false); };
-    r.onerror = () => setListening(false);
+    r.onresult = ev => {
+      const transcript = ev.results[0][0].transcript.toLowerCase();
+      setListening(false);
+      // Parse the voice input
+      const amtMatch = transcript.match(/(\d+\.?\d*)/);
+      const amt = amtMatch ? parseFloat(amtMatch[1]) : 0;
+      let foundCat = "";
+      const currentCats = cats;
+      for (const c of currentCats) { if (transcript.includes(c.name.toLowerCase())) { foundCat = c.name; break; } }
+      if (!foundCat) {
+        const kw = { Food:["food","lunch","dinner","breakfast","coffee","groceries","eat","snack","meal","restaurant"],Transport:["uber","taxi","bus","gas","fuel","ride","train"],Housing:["rent","mortgage"],Entertainment:["movie","netflix","game","concert"],Shopping:["shop","buy","bought","amazon","clothes"],Health:["doctor","medicine","gym","pharmacy"],Utilities:["bill","internet","phone","electric","water"],Education:["book","course","school","tuition"],Travel:["flight","hotel","trip","travel","vacation"] };
+        for (const [k, ws] of Object.entries(kw)) if (ws.some(w => transcript.includes(w)) && currentCats.find(c => c.name === k)) { foundCat = k; break; }
+      }
+      if (!foundCat) foundCat = "Other";
+      let desc = transcript.replace(/\d+\.?\d*/, "").replace(foundCat.toLowerCase(), "").trim();
+      if (!desc) desc = transcript;
+      if (amt > 0) {
+        const newExp = { id: Date.now(), amt, cur: bCurr, convAmt: amt, desc: desc.charAt(0).toUpperCase()+desc.slice(1), category: foundCat, date: new Date().toISOString() };
+        setExps(p => [newExp, ...p]);
+        setShowAdd(false);
+      } else {
+        setEDesc(desc);
+        if (foundCat) setECat(foundCat);
+      }
+    };
+    r.onerror = (e) => { console.log("Speech error:", e.error); setListening(false); };
     r.onend = () => setListening(false);
-    recRef.current = r; r.start();
-  }, [cats, bCurr]);
-
-  const parseVoice = text => {
-    const m = text.match(/(\d+\.?\d*)/);
-    const amt = m ? parseFloat(m[1]) : 0;
-    let cat = "";
-    for (const c of cats) { if (text.includes(c.name.toLowerCase())) { cat = c.name; break; } }
-    if (!cat) {
-      const kw = { Food:["food","lunch","dinner","breakfast","coffee","groceries","eat"],Transport:["uber","taxi","bus","gas","fuel"],Housing:["rent","mortgage"],Entertainment:["movie","netflix","game"],Shopping:["shop","buy","bought","amazon"],Health:["doctor","medicine","gym"],Utilities:["bill","internet","phone"],Education:["book","course","school"],Travel:["flight","hotel","trip","travel"] };
-      for (const [k, ws] of Object.entries(kw)) if (ws.some(w => text.includes(w)) && cats.find(c => c.name === k)) { cat = k; break; }
-    }
-    if (!cat) cat = "Other";
-    let desc = text.replace(/\d+\.?\d*/, "").replace(cat.toLowerCase(), "").trim();
-    if (!desc) desc = text;
-    if (amt > 0) {
-      setExps(p => [{ id: Date.now(), amt, cur: bCurr, convAmt: amt, desc: desc.charAt(0).toUpperCase()+desc.slice(1), category: cat, date: new Date().toISOString() }, ...p]);
-      setShowAdd(false);
-    } else { setEDesc(desc); if (cat) setECat(cat); }
+    recRef.current = r;
+    r.start();
   };
 
   // Receipt
