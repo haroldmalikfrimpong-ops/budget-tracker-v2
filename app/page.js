@@ -91,6 +91,7 @@ export default function BudgetTrackerV2() {
   const fileRef = useRef(null);
   const camRef = useRef(null);
   const [cTab, setCTab] = useState("category");
+  const [confirmAction, setConfirmAction] = useState(null);
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -201,14 +202,17 @@ export default function BudgetTrackerV2() {
           { type: "text", text: "Analyze receipt. Return ONLY JSON: {\"total\":0,\"currency\":\"USD\",\"description\":\"brief\",\"category\":\"" + cats.map(c=>c.name).join("|") + "\"}" }
         ] }] })
       });
+      if (!res.ok) { setScanErr("OCR unavailable — enter details manually."); setScanning(false); return; }
       const data = await res.json();
+      if (data.error) { setScanErr("OCR unavailable — enter details manually."); setScanning(false); return; }
       const txt = (data.content || []).map(i => i.text || "").join("");
-      const p = JSON.parse(txt.replace(/```json|```/g, "").trim());
+      const clean = txt.replace(/```json|```/g, "").trim();
+      const p = JSON.parse(clean);
       if (p.total) setEAmt(String(p.total));
       if (p.description) setEDesc(p.description);
       if (p.category && cats.find(c => c.name === p.category)) setECat(p.category);
       if (p.currency) { const m = CURRENCIES.find(c => c.code === p.currency.toUpperCase()); if (m) setECurr(m.code); }
-    } catch { setScanErr("Couldn't read receipt."); }
+    } catch (err) { setScanErr("OCR unavailable — enter details manually."); }
     setScanning(false);
   };
 
@@ -614,8 +618,8 @@ export default function BudgetTrackerV2() {
             </div>
 
             <div style={{ fontSize:14, fontWeight:600, color:t.rd, marginBottom:10, textTransform:"uppercase", letterSpacing:1 }}>Danger Zone</div>
-            <button style={{ ...btn(t.rd), marginBottom:10 }} onClick={() => { setExps([]); setAlerts([]); }}>🗑️ Reset All Data</button>
-            <button style={{ ...btn(t.al), color:t.tx, border:"1px solid "+t.bd }} onClick={() => { setOnboarded(false); setObStep(0); setExps([]); setAlerts([]); }}>🔄 Start Fresh</button>
+            <button style={{ ...btn(t.rd), marginBottom:10 }} onClick={() => setConfirmAction("reset")}>🗑️ Reset All Data</button>
+            <button style={{ ...btn(t.al), color:t.tx, border:"1px solid "+t.bd }} onClick={() => setConfirmAction("fresh")}>🔄 Start Fresh</button>
           </div>
         </div>
       )}
@@ -753,6 +757,38 @@ export default function BudgetTrackerV2() {
               <span style={{ cursor:"pointer", fontSize:20, color:t.sc }} onClick={() => setShowRep(false)}>✕</span>
             </div>
             {report.map((x,i) => <div key={i} style={{ padding:16, borderRadius:14, background:t.al, border:"1px solid "+t.bd, marginBottom:10, fontSize:14, lineHeight:1.7, whiteSpace:"pre-line" }}>{x}</div>)}
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRMATION MODAL */}
+      {confirmAction && (
+        <div style={modBg} onClick={e => e.target === e.currentTarget && setConfirmAction(null)}>
+          <div style={{ width:"100%", maxWidth:380, background:t.cd, borderRadius:24, padding:28, margin:"auto", animation:"fadeIn 0.2s", textAlign:"center" }}>
+            <div style={{ fontSize:48, marginBottom:16 }}>{confirmAction === "reset" ? "🗑️" : "🔄"}</div>
+            <h3 style={{ fontSize:20, fontWeight:700, marginBottom:8 }}>
+              {confirmAction === "reset" ? "Reset All Data?" : "Start Fresh?"}
+            </h3>
+            <p style={{ fontSize:14, color:t.sc, lineHeight:1.5, marginBottom:24 }}>
+              {confirmAction === "reset"
+                ? "This will delete all your expenses and alert history. This cannot be undone."
+                : "This will erase everything and take you back to the beginning. All data will be lost."
+              }
+            </p>
+            <div style={{ display:"flex", gap:10 }}>
+              <button style={{ ...btn(t.al), flex:1, color:t.tx, border:"1px solid "+t.bd }} onClick={() => setConfirmAction(null)}>Cancel</button>
+              <button style={{ ...btn(t.rd), flex:1 }} onClick={() => {
+                if (confirmAction === "reset") {
+                  setExps([]); setAlerts([]);
+                } else {
+                  setOnboarded(false); setObStep(0); setExps([]); setAlerts([]);
+                  localStorage.removeItem("btv2");
+                }
+                setConfirmAction(null);
+              }}>
+                {confirmAction === "reset" ? "Delete All" : "Start Over"}
+              </button>
+            </div>
           </div>
         </div>
       )}
