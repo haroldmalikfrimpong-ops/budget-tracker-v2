@@ -77,7 +77,7 @@ export default function BudgetTrackerV2() {
   const [obStep, setObStep] = useState(0);
   const [obName, setObName] = useState("");
   const [obCurr, setObCurr] = useState("USD");
-  const [obCats, setObCats] = useState(DEF_CATS.map(c => c.name));
+  const [obCats, setObCats] = useState([]);
   const [obBdgt, setObBdgt] = useState("5000");
   const [eAmt, setEAmt] = useState("");
   const [eDesc, setEDesc] = useState("");
