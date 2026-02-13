@@ -55,6 +55,37 @@ function barColor(p) {
   return "#ff6b6b";
 }
 
+// Auto-detect currency from typed input like "$25", "€50", "£30"
+const SYMBOL_MAP = {"$":"USD","€":"EUR","£":"GBP","¥":"JPY","₹":"INR","₦":"NGN","₵":"GHS","₩":"KRW","Fr":"CHF","R$":"BRL","C$":"CAD","A$":"AUD","S$":"SGD","د.إ":"AED"};
+function detectCurrency(input) {
+  const s = input.trim();
+  // Check multi-char symbols first (R$, C$, A$, S$, د.إ)
+  for (const [sym, code] of Object.entries(SYMBOL_MAP)) {
+    if (sym.length > 1 && (s.startsWith(sym) || s.endsWith(sym))) {
+      const num = parseFloat(s.replace(sym, "").replace(/,/g, "").trim());
+      if (!isNaN(num) && num > 0) return { amount: num, currency: code };
+    }
+  }
+  // Check single-char symbols
+  for (const [sym, code] of Object.entries(SYMBOL_MAP)) {
+    if (sym.length === 1 && (s.startsWith(sym) || s.endsWith(sym))) {
+      const num = parseFloat(s.replace(sym, "").replace(/,/g, "").trim());
+      if (!isNaN(num) && num > 0) return { amount: num, currency: code };
+    }
+  }
+  // Check currency codes like "25 EUR", "EUR 25", "50 GBP"
+  const codeMatch = s.match(/^([A-Z]{3})\s*([\d,.]+)$|^([\d,.]+)\s*([A-Z]{3})$/);
+  if (codeMatch) {
+    const code = codeMatch[1] || codeMatch[4];
+    const num = parseFloat((codeMatch[2] || codeMatch[3]).replace(/,/g, ""));
+    if (CURRENCIES.find(c => c.code === code) && !isNaN(num) && num > 0) return { amount: num, currency: code };
+  }
+  // Plain number
+  const num = parseFloat(s.replace(/,/g, ""));
+  if (!isNaN(num) && num > 0) return { amount: num, currency: null };
+  return { amount: 0, currency: null };
+}
+
 export default function BudgetTrackerV2() {
   const [dk, setDk] = useState(true);
   const [onboarded, setOnboarded] = useState(false);
@@ -193,8 +224,11 @@ export default function BudgetTrackerV2() {
   const clrReceipt = () => { setRcImg(null); if (fileRef.current) fileRef.current.value=""; if (camRef.current) camRef.current.value=""; };
 
   const addExpense = () => {
-    const a = parseFloat(eAmt); if (!a || !eCat) return;
-    setExps(p => [{ id: Date.now(), amt: a, cur: eCurr, convAmt: cnv(a, eCurr, bCurr), desc: eDesc || eCat, category: eCat, date: new Date().toISOString() }, ...p]);
+    const d = detectCurrency(eAmt);
+    const a = d.amount || parseFloat(eAmt);
+    if (!a || !eCat) return;
+    const cur = d.currency || eCurr;
+    setExps(p => [{ id: Date.now(), amt: a, cur, convAmt: cnv(a, cur, bCurr), desc: eDesc || eCat, category: eCat, date: new Date().toISOString() }, ...p]);
     setEAmt(""); setEDesc(""); setECat(""); clrReceipt(); setShowAdd(false);
   };
 
@@ -647,10 +681,15 @@ export default function BudgetTrackerV2() {
             )}
 
             <div style={{ display:"flex", gap:10, marginBottom:12 }}>
-              <input style={{ ...inp, flex:1 }} type="number" placeholder="Amount" value={eAmt} onChange={e => setEAmt(e.target.value)} />
+              <input style={{ ...inp, flex:1 }} type="text" inputMode="decimal" placeholder="Amount (e.g. €50, £30, $25)" value={eAmt} onChange={e => {
+                const v = e.target.value;
+                setEAmt(v);
+                const d = detectCurrency(v);
+                if (d.currency && d.currency !== eCurr) setECurr(d.currency);
+              }} />
               <select style={{ ...inp, width:88, appearance:"auto" }} value={eCurr} onChange={e => setECurr(e.target.value)}>{CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}</select>
             </div>
-            {eCurr !== bCurr && eAmt && <div style={{ fontSize:12, color:t.sc, marginBottom:8, textAlign:"right" }}>{"≈ "+fmtM(cnv(parseFloat(eAmt)||0, eCurr, bCurr), bCurr)}</div>}
+            {eCurr !== bCurr && eAmt && <div style={{ fontSize:12, color:t.sc, marginBottom:8, textAlign:"right" }}>{"≈ "+fmtM(cnv(detectCurrency(eAmt).amount || parseFloat(eAmt) || 0, eCurr, bCurr), bCurr)}</div>}
             <input style={{ ...inp, marginBottom:12 }} placeholder="Description (optional)" value={eDesc} onChange={e => setEDesc(e.target.value)} />
             <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:8, marginBottom:16 }}>
               {cats.map(cat => (
