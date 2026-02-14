@@ -895,7 +895,7 @@ export default function BudgetTrackerV2() {
                   <span style={{ fontSize:8, color:eCat===cat.name?"#fff":t.sc }}>{cat.name}</span>
                 </div>
               ))}
-              {bizMode && (
+              {(bizMode || (isPro && activeMode === "pro")) && (
                 <div onClick={() => setShowAddCat(true)} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3, padding:"10px 4px", borderRadius:12, background:t.al, border:"1px dashed "+t.ac, cursor:"pointer" }}>
                   <span style={{ fontSize:20 }}>➕</span>
                   <span style={{ fontSize:8, color:t.ac }}>Custom</span>
