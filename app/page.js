@@ -33,6 +33,19 @@ const DEF_CATS = [
   { name: "Other", emoji: "💰", color: "#a18cd1" },
 ];
 
+const DEF_BIZ_CATS = [
+  { name: "Office Supplies", emoji: "🖨️", color: "#667eea" },
+  { name: "Marketing", emoji: "📣", color: "#f093fb" },
+  { name: "Software", emoji: "💻", color: "#6C63FF" },
+  { name: "Travel & Ent.", emoji: "✈️", color: "#0fd850" },
+  { name: "Professional", emoji: "⚖️", color: "#f78ca0" },
+  { name: "Payroll", emoji: "👥", color: "#4facfe" },
+  { name: "Insurance", emoji: "🛡️", color: "#f5af19" },
+  { name: "Taxes", emoji: "📋", color: "#fa709a" },
+  { name: "Equipment", emoji: "🔧", color: "#43e97b" },
+  { name: "Other Biz", emoji: "💼", color: "#a18cd1" },
+];
+
 const RATES = { USD: 1, EUR: 0.92, GBP: 0.79, AED: 3.67, JPY: 149.5, CAD: 1.36, AUD: 1.53, INR: 83.1, NGN: 1550, GHS: 14.5, ZAR: 18.5, BRL: 4.97, CNY: 7.24, KRW: 1330, SGD: 1.34, CHF: 0.88 };
 
 const MO_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -114,6 +127,7 @@ export default function BudgetTrackerV2() {
   const [eDesc, setEDesc] = useState("");
   const [eCat, setECat] = useState("");
   const [eCurr, setECurr] = useState("USD");
+  const [eIsTax, setEIsTax] = useState(false);
   const [listening, setListening] = useState(false);
   const recRef = useRef(null);
   const [rcImg, setRcImg] = useState(null);
@@ -132,6 +146,19 @@ export default function BudgetTrackerV2() {
   const [rAmt, setRAmt] = useState("");
   const [rCat, setRCat] = useState("Housing");
   const PRO_CODE = "MALIK2026";
+  // Business
+  const [bizMode, setBizMode] = useState(false);
+  const [invoices, setInvoices] = useState([]);
+  const [revenue, setRevenue] = useState([]);
+  const [showInvoice, setShowInvoice] = useState(false);
+  const [showRevenue, setShowRevenue] = useState(false);
+  const [showPL, setShowPL] = useState(false);
+  const [iName, setIName] = useState("");
+  const [iAmt, setIAmt] = useState("");
+  const [iClient, setIClient] = useState("");
+  const [rvAmt, setRvAmt] = useState("");
+  const [rvDesc, setRvDesc] = useState("");
+  const [rvSrc, setRvSrc] = useState("");
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -154,6 +181,9 @@ export default function BudgetTrackerV2() {
         if (s.isPro) setIsPro(true);
         if (s.recurring) setRecurring(s.recurring);
         if (s.catBudgets) setCatBudgets(s.catBudgets);
+        if (s.bizMode) setBizMode(s.bizMode);
+        if (s.invoices) setInvoices(s.invoices);
+        if (s.revenue) setRevenue(s.revenue);
       }
     } catch (e) { console.log("Load error", e); }
   }, []);
@@ -163,10 +193,10 @@ export default function BudgetTrackerV2() {
     if (!onboarded) return;
     try {
       localStorage.setItem("btv2", JSON.stringify({
-        onboarded, bCurr, cats, budget, uName, exps, dk, warnAt, alertAt, notifOn, dailyRem, alerts, isPro, recurring, catBudgets
+        onboarded, bCurr, cats, budget, uName, exps, dk, warnAt, alertAt, notifOn, dailyRem, alerts, isPro, recurring, catBudgets, bizMode, invoices, revenue
       }));
     } catch (e) { console.log("Save error", e); }
-  }, [onboarded, bCurr, cats, budget, uName, exps, dk, warnAt, alertAt, notifOn, dailyRem, alerts, isPro, recurring, catBudgets]);
+  }, [onboarded, bCurr, cats, budget, uName, exps, dk, warnAt, alertAt, notifOn, dailyRem, alerts, isPro, recurring, catBudgets, bizMode, invoices, revenue]);
 
   // Theme
   const t = dk
@@ -191,6 +221,14 @@ export default function BudgetTrackerV2() {
   const recurTotal = recurring.reduce((s, r) => s + r.amt, 0);
   const spendable = budget - recurTotal;
   const adjRemain = isPro ? spendable - totSpent : remain;
+
+  // Business computed
+  const moRevenue = revenue.filter(r => { const d = new Date(r.date); return d.getMonth() === cMo && d.getFullYear() === cYr; });
+  const totalRev = moRevenue.reduce((s, r) => s + r.amt, 0);
+  const profit = totalRev - totSpent;
+  const unpaidInv = invoices.filter(i => !i.paid);
+  const paidInv = invoices.filter(i => i.paid);
+  const taxExps = moExps.filter(e => e.taxDeduct);
 
   // Voice
   const startListen = () => {
@@ -247,8 +285,8 @@ export default function BudgetTrackerV2() {
     const a = d.amount || parseFloat(eAmt);
     if (!a || !eCat) return;
     const cur = d.currency || eCurr;
-    setExps(p => [{ id: Date.now(), amt: a, cur, convAmt: cnv(a, cur, bCurr), desc: eDesc || eCat, category: eCat, date: new Date().toISOString() }, ...p]);
-    setEAmt(""); setEDesc(""); setECat(""); clrReceipt(); setShowAdd(false);
+    setExps(p => [{ id: Date.now(), amt: a, cur, convAmt: cnv(a, cur, bCurr), desc: eDesc || eCat, category: eCat, date: new Date().toISOString(), taxDeduct: bizMode && eIsTax }, ...p]);
+    setEAmt(""); setEDesc(""); setECat(""); setEIsTax(false); clrReceipt(); setShowAdd(false);
   };
 
   const delExp = id => setExps(p => p.filter(e => e.id !== id));
@@ -369,7 +407,7 @@ export default function BudgetTrackerV2() {
         <div style={{ width:40, height:40, borderRadius:12, background:t.al, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20 }}>{c?.emoji || "💰"}</div>
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontWeight:600, fontSize:14, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{e.desc}</div>
-          <div style={{ fontSize:12, color:t.sc }}>{c?.name} · {new Date(e.date).toLocaleDateString("en",{month:"short",day:"numeric"})}{e.cur !== bCurr ? (" · "+(CURRENCIES.find(x=>x.code===e.cur)?.symbol||"")+e.amt) : ""}</div>
+          <div style={{ fontSize:12, color:t.sc }}>{c?.name} · {new Date(e.date).toLocaleDateString("en",{month:"short",day:"numeric"})}{e.cur !== bCurr ? (" · "+(CURRENCIES.find(x=>x.code===e.cur)?.symbol||"")+e.amt) : ""}{e.taxDeduct ? " · 📋 Tax" : ""}</div>
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:6 }}>
           <span style={{ fontWeight:700, color:t.rd, fontSize:15, whiteSpace:"nowrap" }}>-{fmtM(e.convAmt, bCurr)}</span>
@@ -471,6 +509,7 @@ export default function BudgetTrackerV2() {
         <div>
           <div style={{ fontSize:13, color:t.sc }}>Welcome back</div>
           <div style={{ fontSize:20, fontWeight:700 }}>{uName} 👋</div>
+          {bizMode && <div style={{ fontSize:11, color:t.ac, fontWeight:600, marginTop:2 }}>💼 Business Mode</div>}
         </div>
         <button onClick={() => setDk(!dk)} style={{ background:t.al, border:"1px solid "+t.bd, borderRadius:12, padding:"8px 12px", color:t.tx, cursor:"pointer", fontSize:16 }}>{dk ? "☀️" : "🌙"}</button>
       </div>
@@ -714,6 +753,37 @@ export default function BudgetTrackerV2() {
               </div>
             )}
 
+            {isPro && (
+              <div style={{ marginBottom:20 }}>
+                <div style={{ fontSize:14, fontWeight:600, color:t.sc, marginBottom:10, marginTop:20, textTransform:"uppercase", letterSpacing:1 }}>Business Mode 💼</div>
+                <div style={{ ...crd, marginBottom:10 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <div><div style={{ fontWeight:600, fontSize:14 }}>Business Mode</div><div style={{ fontSize:12, color:t.sc }}>{bizMode ? "Business categories + tax + invoices" : "Switch to business expense tracking"}</div></div>
+                    <div style={tog(bizMode)} onClick={() => { setBizMode(!bizMode); if (!bizMode) setCats(DEF_BIZ_CATS); else setCats(DEF_CATS); }}><div style={togD(bizMode)} /></div>
+                  </div>
+                </div>
+                {bizMode && (
+                  <>
+                    <div onClick={() => setShowInvoice(true)} style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 16px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:8, cursor:"pointer" }}>
+                      <span style={{ fontSize:20 }}>🧾</span>
+                      <div style={{ flex:1 }}><div style={{ fontWeight:600, fontSize:14 }}>Invoices</div><div style={{ fontSize:12, color:t.sc }}>{unpaidInv.length} unpaid · {paidInv.length} paid</div></div>
+                      <span style={{ color:t.sc }}>›</span>
+                    </div>
+                    <div onClick={() => setShowRevenue(true)} style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 16px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:8, cursor:"pointer" }}>
+                      <span style={{ fontSize:20 }}>💵</span>
+                      <div style={{ flex:1 }}><div style={{ fontWeight:600, fontSize:14 }}>Revenue</div><div style={{ fontSize:12, color:t.sc }}>{fmtM(totalRev, bCurr)} this month</div></div>
+                      <span style={{ color:t.sc }}>›</span>
+                    </div>
+                    <div onClick={() => setShowPL(true)} style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 16px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:8, cursor:"pointer" }}>
+                      <span style={{ fontSize:20 }}>📈</span>
+                      <div style={{ flex:1 }}><div style={{ fontWeight:600, fontSize:14 }}>P&L Dashboard</div><div style={{ fontSize:12, color:profit>=0?t.gn:t.rd }}>{profit>=0?"Profit":"Loss"}: {fmtM(Math.abs(profit), bCurr)}</div></div>
+                      <span style={{ color:t.sc }}>›</span>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
             <div style={{ fontSize:14, fontWeight:600, color:t.sc, marginBottom:10, marginTop:20, textTransform:"uppercase", letterSpacing:1 }}>Appearance</div>
             <div style={{ display:"flex", gap:10, marginBottom:20 }}>
               <button onClick={() => setDk(true)} style={{ ...btn(dk?t.ac:t.al), flex:1, color:dk?"#fff":t.tx, border:"1px solid "+(dk?t.ac:t.bd) }}>🌙 Dark</button>
@@ -799,6 +869,12 @@ export default function BudgetTrackerV2() {
                 </div>
               ))}
             </div>
+            {bizMode && (
+              <div onClick={() => setEIsTax(!eIsTax)} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px", borderRadius:12, background:eIsTax?t.gn+"15":t.al, border:"1px solid "+(eIsTax?t.gn+"40":t.bd), marginBottom:12, cursor:"pointer" }}>
+                <span style={{ fontSize:18 }}>{eIsTax ? "✅" : "⬜"}</span>
+                <span style={{ fontSize:13, color:eIsTax?t.gn:t.sc }}>Tax Deductible</span>
+              </div>
+            )}
             <button style={{ ...btn(), opacity:eAmt&&eCat?1:0.4 }} onClick={addExpense}>Add Expense</button>
           </div>
         </div>
@@ -900,6 +976,160 @@ export default function BudgetTrackerV2() {
           </div>
         </div>
       )}
+      {/* INVOICE MODAL */}
+      {showInvoice && (
+        <div style={modBg} onClick={e => e.target === e.currentTarget && setShowInvoice(false)}>
+          <div style={sheet}>
+            <div style={handle} />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <h3 style={{ fontSize:20, fontWeight:700 }}>🧾 Invoices</h3>
+              <span style={{ cursor:"pointer", fontSize:20, color:t.sc }} onClick={() => setShowInvoice(false)}>✕</span>
+            </div>
+            <div style={{ padding:16, borderRadius:14, background:t.al, border:"1px solid "+t.bd, marginBottom:16 }}>
+              <input style={{ ...inp, marginBottom:8 }} placeholder="Invoice description" value={iName} onChange={e => setIName(e.target.value)} />
+              <div style={{ display:"flex", gap:8, marginBottom:8 }}>
+                <input style={{ ...inp, flex:1 }} type="number" placeholder="Amount" value={iAmt} onChange={e => setIAmt(e.target.value)} />
+                <input style={{ ...inp, flex:1 }} placeholder="Client name" value={iClient} onChange={e => setIClient(e.target.value)} />
+              </div>
+              <button style={{ ...btn(), opacity:iName&&iAmt?1:0.4 }} onClick={() => {
+                if (!iName || !iAmt) return;
+                setInvoices(p => [{ id: Date.now(), name: iName, amt: parseFloat(iAmt), client: iClient, paid: false, date: new Date().toISOString() }, ...p]);
+                setIName(""); setIAmt(""); setIClient("");
+              }}>Create Invoice</button>
+            </div>
+            {invoices.length === 0 ? (
+              <div style={{ textAlign:"center", padding:24, color:t.sc }}>No invoices yet</div>
+            ) : (
+              <>
+                <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+                  <div style={{ flex:1, padding:10, borderRadius:10, background:t.wn+"12", textAlign:"center" }}><div style={{ fontSize:11, color:t.sc }}>Unpaid</div><div style={{ fontSize:16, fontWeight:700, color:t.wn }}>{fmtM(unpaidInv.reduce((s,i)=>s+i.amt,0), bCurr)}</div></div>
+                  <div style={{ flex:1, padding:10, borderRadius:10, background:t.gn+"12", textAlign:"center" }}><div style={{ fontSize:11, color:t.sc }}>Paid</div><div style={{ fontSize:16, fontWeight:700, color:t.gn }}>{fmtM(paidInv.reduce((s,i)=>s+i.amt,0), bCurr)}</div></div>
+                </div>
+                {invoices.map(inv => (
+                  <div key={inv.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 14px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:8 }}>
+                    <div style={{ width:40, height:40, borderRadius:12, background:inv.paid?t.gn+"20":t.wn+"20", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>{inv.paid?"✅":"📄"}</div>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontWeight:600, fontSize:14 }}>{inv.name}</div>
+                      <div style={{ fontSize:12, color:t.sc }}>{inv.client || "No client"} · {new Date(inv.date).toLocaleDateString("en",{month:"short",day:"numeric"})}</div>
+                    </div>
+                    <span style={{ fontWeight:700, fontSize:14, color:inv.paid?t.gn:t.tx }}>{fmtM(inv.amt, bCurr)}</span>
+                    <span style={{ cursor:"pointer", padding:6, fontSize:12, color:t.ac }} onClick={() => setInvoices(p => p.map(i => i.id === inv.id ? {...i, paid:!i.paid} : i))}>{inv.paid?"Undo":"Pay"}</span>
+                    <span style={{ cursor:"pointer", color:t.sc, padding:4 }} onClick={() => setInvoices(p => p.filter(i => i.id !== inv.id))}>✕</span>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* REVENUE MODAL */}
+      {showRevenue && (
+        <div style={modBg} onClick={e => e.target === e.currentTarget && setShowRevenue(false)}>
+          <div style={sheet}>
+            <div style={handle} />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <h3 style={{ fontSize:20, fontWeight:700 }}>💵 Revenue</h3>
+              <span style={{ cursor:"pointer", fontSize:20, color:t.sc }} onClick={() => setShowRevenue(false)}>✕</span>
+            </div>
+            <div style={{ padding:16, borderRadius:14, background:t.al, border:"1px solid "+t.bd, marginBottom:16 }}>
+              <input style={{ ...inp, marginBottom:8 }} type="number" placeholder="Amount" value={rvAmt} onChange={e => setRvAmt(e.target.value)} />
+              <input style={{ ...inp, marginBottom:8 }} placeholder="Description (e.g. Client payment)" value={rvDesc} onChange={e => setRvDesc(e.target.value)} />
+              <input style={{ ...inp, marginBottom:8 }} placeholder="Source (e.g. Freelance, Sales)" value={rvSrc} onChange={e => setRvSrc(e.target.value)} />
+              <button style={{ ...btn(), background:"linear-gradient(135deg,"+t.gn+",#43e97b)", opacity:rvAmt?1:0.4 }} onClick={() => {
+                if (!rvAmt) return;
+                setRevenue(p => [{ id: Date.now(), amt: parseFloat(rvAmt), desc: rvDesc || "Revenue", source: rvSrc, date: new Date().toISOString() }, ...p]);
+                setRvAmt(""); setRvDesc(""); setRvSrc("");
+              }}>Add Revenue</button>
+            </div>
+            <div style={{ padding:"10px 14px", borderRadius:10, background:t.gn+"12", marginBottom:12, textAlign:"center" }}>
+              <div style={{ fontSize:11, color:t.sc }}>This Month</div>
+              <div style={{ fontSize:20, fontWeight:700, color:t.gn }}>{fmtM(totalRev, bCurr)}</div>
+            </div>
+            {revenue.length === 0 ? (
+              <div style={{ textAlign:"center", padding:24, color:t.sc }}>No revenue logged yet</div>
+            ) : revenue.map(r => (
+              <div key={r.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 14px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:8 }}>
+                <div style={{ width:40, height:40, borderRadius:12, background:t.gn+"20", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>💵</div>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontWeight:600, fontSize:14 }}>{r.desc}</div>
+                  <div style={{ fontSize:12, color:t.sc }}>{r.source || "Revenue"} · {new Date(r.date).toLocaleDateString("en",{month:"short",day:"numeric"})}</div>
+                </div>
+                <span style={{ fontWeight:700, fontSize:14, color:t.gn }}>+{fmtM(r.amt, bCurr)}</span>
+                <span style={{ cursor:"pointer", color:t.sc, padding:4 }} onClick={() => setRevenue(p => p.filter(x => x.id !== r.id))}>✕</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* P&L DASHBOARD MODAL */}
+      {showPL && (
+        <div style={modBg} onClick={e => e.target === e.currentTarget && setShowPL(false)}>
+          <div style={sheet}>
+            <div style={handle} />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <h3 style={{ fontSize:20, fontWeight:700 }}>📈 Profit & Loss</h3>
+              <span style={{ cursor:"pointer", fontSize:20, color:t.sc }} onClick={() => setShowPL(false)}>✕</span>
+            </div>
+            <div style={{ textAlign:"center", marginBottom:20 }}>
+              <div style={{ fontSize:13, color:t.sc }}>{FULL_MO[cMo]} {cYr}</div>
+            </div>
+            {/* Summary cards */}
+            <div style={{ display:"flex", gap:10, marginBottom:16 }}>
+              <div style={{ flex:1, padding:16, borderRadius:14, background:t.gn+"12", textAlign:"center" }}>
+                <div style={{ fontSize:11, color:t.sc }}>Revenue</div>
+                <div style={{ fontSize:22, fontWeight:700, color:t.gn, marginTop:4 }}>{fmtM(totalRev, bCurr)}</div>
+              </div>
+              <div style={{ flex:1, padding:16, borderRadius:14, background:t.rd+"12", textAlign:"center" }}>
+                <div style={{ fontSize:11, color:t.sc }}>Expenses</div>
+                <div style={{ fontSize:22, fontWeight:700, color:t.rd, marginTop:4 }}>{fmtM(totSpent, bCurr)}</div>
+              </div>
+            </div>
+            <div style={{ padding:20, borderRadius:14, background:profit>=0?"#4ecdc412":"#ff6b6b12", border:"1px solid "+(profit>=0?t.gn:t.rd)+"30", textAlign:"center", marginBottom:16 }}>
+              <div style={{ fontSize:13, color:t.sc }}>Net {profit>=0?"Profit":"Loss"}</div>
+              <div style={{ fontSize:32, fontWeight:700, color:profit>=0?t.gn:t.rd, marginTop:4 }}>{profit>=0?"+":""}{fmtM(profit, bCurr)}</div>
+              <div style={{ fontSize:12, color:t.sc, marginTop:4 }}>Margin: {totalRev>0?((profit/totalRev)*100).toFixed(1):0}%</div>
+            </div>
+            {/* Tax deductible summary */}
+            {taxExps.length > 0 && (
+              <div style={{ padding:14, borderRadius:14, background:t.al, border:"1px solid "+t.bd, marginBottom:16 }}>
+                <div style={{ fontSize:13, fontWeight:600, marginBottom:8 }}>📋 Tax Deductible Expenses</div>
+                <div style={{ fontSize:20, fontWeight:700, color:t.ac }}>{fmtM(taxExps.reduce((s,e)=>s+e.convAmt,0), bCurr)}</div>
+                <div style={{ fontSize:12, color:t.sc, marginTop:4 }}>{taxExps.length} tax-deductible transactions</div>
+              </div>
+            )}
+            {/* Top expense categories */}
+            <div style={{ padding:14, borderRadius:14, background:t.al, border:"1px solid "+t.bd, marginBottom:12 }}>
+              <div style={{ fontSize:13, fontWeight:600, marginBottom:10 }}>Top Expense Categories</div>
+              {Object.entries(catTotals).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([cat, amt]) => {
+                const cp = totSpent > 0 ? (amt/totSpent)*100 : 0;
+                return (
+                  <div key={cat} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
+                    <span style={{ fontSize:16 }}>{cats.find(c=>c.name===cat)?.emoji||"💰"}</span>
+                    <div style={{ flex:1 }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, marginBottom:3 }}><span>{cat}</span><span style={{ color:t.sc }}>{fmtM(amt,bCurr)} ({cp.toFixed(0)}%)</span></div>
+                      <div style={{ width:"100%", height:4, borderRadius:2, background:t.bd }}><div style={{ height:"100%", borderRadius:2, width:cp+"%", background:cats.find(c=>c.name===cat)?.color||t.ac }} /></div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Revenue sources */}
+            {moRevenue.length > 0 && (
+              <div style={{ padding:14, borderRadius:14, background:t.al, border:"1px solid "+t.bd }}>
+                <div style={{ fontSize:13, fontWeight:600, marginBottom:10 }}>Revenue Sources</div>
+                {moRevenue.map(r => (
+                  <div key={r.id} style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", fontSize:13 }}>
+                    <span>{r.desc}</span><span style={{ color:t.gn, fontWeight:600 }}>+{fmtM(r.amt, bCurr)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* UPGRADE MODAL */}
       {showUpgrade && (
         <div style={modBg} onClick={e => e.target === e.currentTarget && setShowUpgrade(false)}>
