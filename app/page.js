@@ -1,514 +1,1351 @@
 "use client";
+import { useState, useEffect, useRef } from "react";
 
-import { useState, useEffect } from "react";
-import {
-  ACCOUNTS, CARTONS_PER_PALLET,
-  subscribeToConfig, updateConfig,
-  subscribeToSales, addSale, editSale, requestDeleteSale, approveDeleteSale, denyDeleteSale,
-  subscribeToActiveLogs, addActiveLog, completeActiveLog, editActiveLog, requestDeleteActiveLog, approveDeleteActiveLog, denyDeleteActiveLog,
-  subscribeToDebts, addDebt, settleDebt as settleDebtFn,
-  subscribeToStockHistory, addStockHistory, deleteStockHistory, editStockHistory,
-  adminDeleteSale, adminDeleteActiveLog, adminDeleteDebt,
-  getCurrentPallet, fmt,
-} from "@/lib/store";
+const CURRENCIES = [
+  { code: "USD", symbol: "$", name: "US Dollar" },
+  { code: "EUR", symbol: "€", name: "Euro" },
+  { code: "GBP", symbol: "£", name: "British Pound" },
+  { code: "AED", symbol: "د.إ", name: "UAE Dirham" },
+  { code: "JPY", symbol: "¥", name: "Japanese Yen" },
+  { code: "CAD", symbol: "C$", name: "Canadian Dollar" },
+  { code: "AUD", symbol: "A$", name: "Australian Dollar" },
+  { code: "INR", symbol: "₹", name: "Indian Rupee" },
+  { code: "NGN", symbol: "₦", name: "Nigerian Naira" },
+  { code: "GHS", symbol: "₵", name: "Ghanaian Cedi" },
+  { code: "ZAR", symbol: "R", name: "South African Rand" },
+  { code: "BRL", symbol: "R$", name: "Brazilian Real" },
+  { code: "CNY", symbol: "¥", name: "Chinese Yuan" },
+  { code: "KRW", symbol: "₩", name: "Korean Won" },
+  { code: "SGD", symbol: "S$", name: "Singapore Dollar" },
+  { code: "CHF", symbol: "Fr", name: "Swiss Franc" },
+];
 
-function Modal({ onClose, children }) {
-  return (
-    <div className="fixed inset-0 flex items-end justify-center z-50" style={{ background: "var(--overlay)", backdropFilter: "blur(8px)" }} onClick={onClose}>
-      <div className="slide-up w-full max-w-[440px] rounded-t-3xl px-6 pt-7 pb-9" style={{ background: "var(--surface)" }} onClick={(e) => e.stopPropagation()}>
-        <div className="w-10 h-1 rounded-full mx-auto mb-5" style={{ background: "var(--text-faint)" }} />
-        {children}
-      </div>
-    </div>
-  );
+const DEF_CATS = [
+  { name: "Food", emoji: "🍔", color: "#f5af19" },
+  { name: "Transport", emoji: "🚗", color: "#4facfe" },
+  { name: "Housing", emoji: "🏠", color: "#fa709a" },
+  { name: "Entertainment", emoji: "🎬", color: "#f093fb" },
+  { name: "Shopping", emoji: "🛒", color: "#6C63FF" },
+  { name: "Health", emoji: "💊", color: "#43e97b" },
+  { name: "Utilities", emoji: "📱", color: "#667eea" },
+  { name: "Education", emoji: "🎓", color: "#f78ca0" },
+  { name: "Travel", emoji: "✈️", color: "#0fd850" },
+  { name: "Other", emoji: "💰", color: "#a18cd1" },
+];
+
+const DEF_BIZ_CATS = [
+  { name: "Office Supplies", emoji: "🖨️", color: "#667eea" },
+  { name: "Marketing", emoji: "📣", color: "#f093fb" },
+  { name: "Software", emoji: "💻", color: "#6C63FF" },
+  { name: "Travel & Ent.", emoji: "✈️", color: "#0fd850" },
+  { name: "Professional", emoji: "⚖️", color: "#f78ca0" },
+  { name: "Payroll", emoji: "👥", color: "#4facfe" },
+  { name: "Insurance", emoji: "🛡️", color: "#f5af19" },
+  { name: "Taxes", emoji: "📋", color: "#fa709a" },
+  { name: "Equipment", emoji: "🔧", color: "#43e97b" },
+  { name: "Other Biz", emoji: "💼", color: "#a18cd1" },
+];
+
+const RATES = { USD: 1, EUR: 0.92, GBP: 0.79, AED: 3.67, JPY: 149.5, CAD: 1.36, AUD: 1.53, INR: 83.1, NGN: 1550, GHS: 14.5, ZAR: 18.5, BRL: 4.97, CNY: 7.24, KRW: 1330, SGD: 1.34, CHF: 0.88 };
+
+const MO_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const FULL_MO = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+function cnv(a, f, to) { return f === to ? a : (a / RATES[f]) * RATES[to]; }
+
+function fmtM(amount, code) {
+  const c = CURRENCIES.find(x => x.code === code) || CURRENCIES[0];
+  const abs = Math.abs(amount);
+  let f = abs >= 1e6 ? (abs/1e6).toFixed(1)+"M" : abs >= 1000 ? abs.toLocaleString("en",{maximumFractionDigits:0}) : abs.toFixed(abs%1===0?0:2);
+  return (amount < 0 ? "-" : "") + c.symbol + f;
 }
 
-function Input({ label, value, onChange, placeholder, type = "text", mono = false }) {
-  return (
-    <div className="mb-3.5">
-      <div className="text-[11px] uppercase tracking-[1.5px] mb-2" style={{ color: "var(--text-sub)" }}>{label}</div>
-      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
-        className="w-full px-4 py-3.5 rounded-xl outline-none"
-        style={{ border: "1px solid var(--input-border)", background: "var(--input-bg)", color: "var(--text)", fontSize: mono ? 16 : 14, fontFamily: mono ? "'Space Mono', monospace" : "'DM Sans', sans-serif" }} />
-    </div>
-  );
+function barColor(p) {
+  if (p < 50) return "#4ecdc4";
+  if (p < 65) return "#43e97b";
+  if (p < 75) return "#f5af19";
+  if (p < 85) return "#FF8C00";
+  return "#ff6b6b";
 }
 
-function PayToggle({ value, onChange }) {
-  return (
-    <div className="mb-6">
-      <div className="text-[11px] uppercase tracking-[1.5px] mb-2.5" style={{ color: "var(--text-sub)" }}>Payment Type</div>
-      <div className="flex gap-2.5">
-        {[{ key: "paid", label: "Paid", sub: "Cash collected", col: "#4ECDC4" }, { key: "consignment", label: "Consignment", sub: "Goes to debt list", col: "#FF9F43" }].map((o) => (
-          <button key={o.key} onClick={() => onChange(o.key)} className="flex-1 py-4 px-3 rounded-[14px] flex flex-col items-center gap-1.5"
-            style={{ border: value === o.key ? `2px solid ${o.col}` : "1px solid var(--input-border)", background: value === o.key ? `${o.col}15` : "transparent" }}>
-            <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ border: `2px solid ${value === o.key ? o.col : "var(--text-faint)"}` }}>
-              {value === o.key && <div className="w-3 h-3 rounded-full" style={{ background: o.col }} />}
-            </div>
-            <div className="text-sm font-semibold" style={{ color: value === o.key ? o.col : "var(--text-muted)" }}>{o.label}</div>
-            <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>{o.sub}</div>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
+// Auto-detect currency from typed input like "$25", "€50", "£30"
+const SYMBOL_MAP = {"$":"USD","€":"EUR","£":"GBP","¥":"JPY","₹":"INR","₦":"NGN","₵":"GHS","₩":"KRW","Fr":"CHF","R$":"BRL","C$":"CAD","A$":"AUD","S$":"SGD","د.إ":"AED"};
+function detectCurrency(input) {
+  const s = input.trim();
+  // Check multi-char symbols first (R$, C$, A$, S$, د.إ)
+  for (const [sym, code] of Object.entries(SYMBOL_MAP)) {
+    if (sym.length > 1 && (s.startsWith(sym) || s.endsWith(sym))) {
+      const num = parseFloat(s.replace(sym, "").replace(/,/g, "").trim());
+      if (!isNaN(num) && num > 0) return { amount: num, currency: code };
+    }
+  }
+  // Check single-char symbols
+  for (const [sym, code] of Object.entries(SYMBOL_MAP)) {
+    if (sym.length === 1 && (s.startsWith(sym) || s.endsWith(sym))) {
+      const num = parseFloat(s.replace(sym, "").replace(/,/g, "").trim());
+      if (!isNaN(num) && num > 0) return { amount: num, currency: code };
+    }
+  }
+  // Check currency codes like "25 EUR", "EUR 25", "50 GBP"
+  const codeMatch = s.match(/^([A-Z]{3})\s*([\d,.]+)$|^([\d,.]+)\s*([A-Z]{3})$/);
+  if (codeMatch) {
+    const code = codeMatch[1] || codeMatch[4];
+    const num = parseFloat((codeMatch[2] || codeMatch[3]).replace(/,/g, ""));
+    if (CURRENCIES.find(c => c.code === code) && !isNaN(num) && num > 0) return { amount: num, currency: code };
+  }
+  // Plain number
+  const num = parseFloat(s.replace(/,/g, ""));
+  if (!isNaN(num) && num > 0) return { amount: num, currency: null };
+  return { amount: 0, currency: null };
 }
 
-function Stat({ label, value, sub, accent }) {
-  return (
-    <div className="flex-1 rounded-2xl p-4 relative overflow-hidden" style={{ background: "var(--card)", border: "1px solid var(--card-border)" }}>
-      <div className="absolute top-0 left-0 right-0 h-0.5 opacity-60" style={{ background: accent }} />
-      <div className="text-[10px] uppercase tracking-[1.5px] mb-1.5" style={{ color: "var(--text-sub)" }}>{label}</div>
-      <div className="text-xl font-bold font-mono" style={{ color: accent }}>{value}</div>
-      <div className="text-[11px] mt-1" style={{ color: "var(--text-muted)" }}>{sub}</div>
-    </div>
-  );
-}
+export default function BudgetTrackerV2() {
+  const [dk, setDk] = useState(true);
+  const [onboarded, setOnboarded] = useState(false);
+  const [bCurr, setBCurr] = useState("USD");
+  const [cats, setCats] = useState(DEF_CATS);
+  const [budget, setBudget] = useState(5000);
+  const [uName, setUName] = useState("");
+  const [exps, setExps] = useState([]);
+  const [pg, setPg] = useState("home");
+  const [warnAt, setWarnAt] = useState(70);
+  const [alertAt, setAlertAt] = useState(85);
+  const [notifOn, setNotifOn] = useState(false);
+  const [dailyRem, setDailyRem] = useState(false);
+  const [alerts, setAlerts] = useState([]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [showIns, setShowIns] = useState(false);
+  const [showRep, setShowRep] = useState(false);
+  const [showTxn, setShowTxn] = useState(false);
+  const [showCht, setShowCht] = useState(false);
+  const [obStep, setObStep] = useState(0);
+  const [obName, setObName] = useState("");
+  const [obCurr, setObCurr] = useState("USD");
+  const [obCats, setObCats] = useState([]);
+  const [obBdgt, setObBdgt] = useState("5000");
+  const [eAmt, setEAmt] = useState("");
+  const [eDesc, setEDesc] = useState("");
+  const [eCat, setECat] = useState("");
+  const [eCurr, setECurr] = useState("USD");
+  const [eIsTax, setEIsTax] = useState(false);
+  const [listening, setListening] = useState(false);
+  const recRef = useRef(null);
+  const [rcImg, setRcImg] = useState(null);
+  const fileRef = useRef(null);
+  const camRef = useRef(null);
+  const [cTab, setCTab] = useState("category");
+  const [confirmAction, setConfirmAction] = useState(null);
+  const [isPro, setIsPro] = useState(false);
+  const [showUpgrade, setShowUpgrade] = useState(false);
+  const [proCode, setProCode] = useState("");
+  const [recurring, setRecurring] = useState([]);
+  const [catBudgets, setCatBudgets] = useState({});
+  const [showRecurring, setShowRecurring] = useState(false);
+  const [showCatBdgt, setShowCatBdgt] = useState(false);
+  const [rName, setRName] = useState("");
+  const [rAmt, setRAmt] = useState("");
+  const [rCat, setRCat] = useState("Housing");
+  const PRO_CODE = "MALIK2026";
+  const BIZ_CODE = "MALIKBIZ26";
+  // Business
+  const [isBiz, setIsBiz] = useState(false);
+  const [bizMode, setBizMode] = useState(false);
+  const [showBizUpgrade, setShowBizUpgrade] = useState(false);
+  const [bizCode, setBizCode] = useState("");
+  const [activeMode, setActiveMode] = useState("personal"); // personal | pro | business
+  const [invoices, setInvoices] = useState([]);
+  const [revenue, setRevenue] = useState([]);
+  const [showInvoice, setShowInvoice] = useState(false);
+  const [showRevenue, setShowRevenue] = useState(false);
+  const [showPL, setShowPL] = useState(false);
+  const [iName, setIName] = useState("");
+  const [iAmt, setIAmt] = useState("");
+  const [iClient, setIClient] = useState("");
+  const [rvAmt, setRvAmt] = useState("");
+  const [rvDesc, setRvDesc] = useState("");
+  const [rvSrc, setRvSrc] = useState("");
+  const [showAddCat, setShowAddCat] = useState(false);
+  const [newCatName, setNewCatName] = useState("");
+  const [newCatEmoji, setNewCatEmoji] = useState("📁");
 
-export default function App() {
-  const [theme, setTheme] = useState("dark");
+  // Load from localStorage on mount
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    setTheme(window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
-    const mq = window.matchMedia("(prefers-color-scheme: light)");
-    const h = (e) => setTheme(e.matches ? "light" : "dark");
-    mq.addEventListener("change", h); return () => mq.removeEventListener("change", h);
+    try {
+      const raw = localStorage.getItem("btv2");
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (s.onboarded) setOnboarded(true);
+        if (s.bCurr) { setBCurr(s.bCurr); setECurr(s.bCurr); }
+        if (s.cats) setCats(s.cats);
+        if (s.budget) setBudget(s.budget);
+        if (s.uName) setUName(s.uName);
+        if (s.exps) setExps(s.exps);
+        if (s.dk !== undefined) setDk(s.dk);
+        if (s.warnAt) setWarnAt(s.warnAt);
+        if (s.alertAt) setAlertAt(s.alertAt);
+        if (s.notifOn) setNotifOn(s.notifOn);
+        if (s.dailyRem) setDailyRem(s.dailyRem);
+        if (s.alerts) setAlerts(s.alerts);
+        if (s.isPro) setIsPro(true);
+        if (s.recurring) setRecurring(s.recurring);
+        if (s.catBudgets) setCatBudgets(s.catBudgets);
+        if (s.bizMode) setBizMode(s.bizMode);
+        if (s.isBiz) setIsBiz(true);
+        if (s.activeMode) setActiveMode(s.activeMode);
+        if (s.invoices) setInvoices(s.invoices);
+        if (s.revenue) setRevenue(s.revenue);
+      }
+    } catch (e) { console.log("Load error", e); }
   }, []);
 
-  const [currentUser, setCurrentUser] = useState(null);
-  const [loginInput, setLoginInput] = useState("");
-  const [loginError, setLoginError] = useState("");
-  const [activeTab, setActiveTab] = useState("dashboard");
-  const [expanded, setExpanded] = useState(null);
-  const toggle = (id) => setExpanded(expanded === id ? null : id);
-  const [confirmDelete, setConfirmDelete] = useState(null);
-
-  useEffect(() => { if (typeof window !== "undefined") { const s = localStorage.getItem("stocksync_user"); if (s && ACCOUNTS[s]) setCurrentUser(s); } }, []);
-  const handleLogin = () => { const uid = loginInput.trim().toLowerCase(); if (ACCOUNTS[uid]) { setCurrentUser(uid); localStorage.setItem("stocksync_user", uid); setActiveTab(ACCOUNTS[uid].role === "pro" ? "dashboard" : "deliver"); setLoginError(""); setLoginInput(""); } else setLoginError("Invalid username"); };
-  const handleLogout = () => { setCurrentUser(null); localStorage.removeItem("stocksync_user"); };
-
-  const [config, setConfig] = useState({ totalStock: 0, stockDate: "", cartonsPerPallet: 84 });
-  const [sales, setSales] = useState([]);
-  const [activeLogs, setActiveLogs] = useState([]);
-  const [debts, setDebts] = useState([]);
-  const [stockHistory, setStockHistory] = useState([]);
-  const [loading, setLoading] = useState(true);
-
+  // Save to localStorage on every change
   useEffect(() => {
-    const u = [subscribeToConfig(setConfig), subscribeToSales(setSales), subscribeToActiveLogs(setActiveLogs), subscribeToStockHistory(setStockHistory), subscribeToDebts((d) => { setDebts(d); setLoading(false); })];
-    return () => u.forEach((fn) => fn());
-  }, []);
+    if (!onboarded) return;
+    try {
+      localStorage.setItem("btv2", JSON.stringify({
+        onboarded, bCurr, cats, budget, uName, exps, dk, warnAt, alertAt, notifOn, dailyRem, alerts, isPro, recurring, catBudgets, bizMode, isBiz, activeMode, invoices, revenue
+      }));
+    } catch (e) { console.log("Save error", e); }
+  }, [onboarded, bCurr, cats, budget, uName, exps, dk, warnAt, alertAt, notifOn, dailyRem, alerts, isPro, recurring, catBudgets, bizMode, isBiz, activeMode, invoices, revenue]);
 
-  const [showForm, setShowForm] = useState(false);
-  const [showCompleteForm, setShowCompleteForm] = useState(null);
-  const [showDebtForm, setShowDebtForm] = useState(false);
-  const [showEditLog, setShowEditLog] = useState(null);
-  const [showEditHistory, setShowEditHistory] = useState(null);
-  const [formCustomer, setFormCustomer] = useState(""); const [formCartons, setFormCartons] = useState(""); const [formPrice, setFormPrice] = useState(""); const [formPayType, setFormPayType] = useState("paid");
-  const [completeCustomer, setCompleteCustomer] = useState(""); const [completePrice, setCompletePrice] = useState(""); const [completePayType, setCompletePayType] = useState("paid");
-  const [debtName, setDebtName] = useState(""); const [debtAmount, setDebtAmount] = useState(""); const [debtNote, setDebtNote] = useState("");
-  const [deliveryQty, setDeliveryQty] = useState("");
-  const [editStock, setEditStock] = useState(""); const [editDate, setEditDate] = useState(""); const [editCPN, setEditCPN] = useState(""); const [settingsSaved, setSettingsSaved] = useState(false);
-  const [editLogCartons, setEditLogCartons] = useState(""); const [editLogCustomer, setEditLogCustomer] = useState(""); const [editLogPrice, setEditLogPrice] = useState("");
-  const [editHistoryStock, setEditHistoryStock] = useState(""); const [editHistoryDate, setEditHistoryDate] = useState(""); const [editHistoryCPN, setEditHistoryCPN] = useState("");
+  // Theme
+  const t = dk
+    ? { bg:"#0a0a0f",cd:"#13131a",al:"#1a1a24",bd:"#252530",tx:"#f0f0f5",sc:"#8888a0",ac:"#6C63FF",gl:"rgba(108,99,255,0.15)",rd:"#ff6b6b",gn:"#4ecdc4",wn:"#f5af19",ip:"#1a1a24" }
+    : { bg:"#f5f5f8",cd:"#ffffff",al:"#f0f0f5",bd:"#e0e0e8",tx:"#1a1a2e",sc:"#666680",ac:"#6C63FF",gl:"rgba(108,99,255,0.1)",rd:"#ff6b6b",gn:"#4ecdc4",wn:"#f5af19",ip:"#f0f0f5" };
 
-  useEffect(() => { setEditStock(String(config.totalStock || "")); setEditDate(config.stockDate || ""); setEditCPN(String(config.cartonsPerPallet || "")); }, [config]);
+  // Computed
+  const nw = new Date();
+  const cMo = nw.getMonth(), cYr = nw.getFullYear(), cDay = nw.getDate();
+  const moExps = exps.filter(e => { const d = new Date(e.date); return d.getMonth() === cMo && d.getFullYear() === cYr; });
+  const totSpent = moExps.reduce((s, e) => s + e.convAmt, 0);
+  const remain = budget - totSpent;
+  const pct = budget > 0 ? Math.min((totSpent / budget) * 100, 100) : 0;
+  const dInMo = new Date(cYr, cMo + 1, 0).getDate();
+  const dBudget = remain > 0 ? remain / (dInMo - cDay + 1) : 0;
+  const todayExps = moExps.filter(e => new Date(e.date).getDate() === cDay);
+  const todaySpent = todayExps.reduce((s, e) => s + e.convAmt, 0);
+  const bCol = barColor(pct);
+  const catTotals = moExps.reduce((a, e) => { a[e.category] = (a[e.category] || 0) + e.convAmt; return a; }, {});
 
-  const TS = config.totalStock || 0, SD = config.stockDate || "Not set", CPN = config.cartonsPerPallet || 84;
-  const TP = TS > 0 ? Math.ceil(TS / CPN) : 0;
-  const liveSales = sales.filter((s) => !s.deleteRequested);
-  const totalSold = liveSales.reduce((s, l) => s + (l.cartons || 0), 0);
-  const stockLeft = TS - totalSold;
-  const paidRevenue = liveSales.filter((l) => l.payType === "paid").reduce((s, l) => s + (l.price || 0), 0);
-  const totalDebtOwed = debts.filter((d) => !d.settled).reduce((s, d) => s + (d.amount || 0), 0);
-  const totalDebtSettled = debts.filter((d) => d.settled).reduce((s, d) => s + (d.amount || 0), 0);
-  const unsettledDebts = debts.filter((d) => !d.settled);
-  const settledDebtsArr = debts.filter((d) => d.settled);
-  const pendingActive = activeLogs.filter((l) => l.status === "pending" && !l.deleteRequested);
-  const deleteRequests = [...activeLogs.filter((l) => l.deleteRequested), ...sales.filter((s) => s.deleteRequested)];
-  const fpSold = Math.floor(totalSold / CPN), cIC = totalSold % CPN, cPN = fpSold + 1, cPL = CPN - cIC, cPP = ((cIC / CPN) * 100).toFixed(0), pLeft = TP - fpSold;
-  const pallets = []; for (let i = 1; i <= TP; i++) { pallets.push({ num: i, status: i < cPN ? "sold" : i === cPN ? "active" : "pending" }); }
-  const palletHasDebt = (n) => unsettledDebts.some((d) => d.pallet === n);
-  const isPro = currentUser && ACCOUNTS[currentUser]?.role === "pro";
-  const isAdmin = currentUser === "pro123";
-  const nowStr = () => { const n = new Date(); return { date: n.toISOString().split("T")[0], time: n.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) }; };
-  const canEdit = (u) => isAdmin || u === currentUser;
-  const askDelete = (label, action) => setConfirmDelete({ label, action });
-  const doDelete = async () => { if (confirmDelete?.action) await confirmDelete.action(); setConfirmDelete(null); setExpanded(null); };
+  // Premium: Recurring & Pre-allocation
+  const recurTotal = recurring.reduce((s, r) => s + r.amt, 0);
+  const spendable = budget - recurTotal;
+  const adjRemain = isPro ? spendable - totSpent : remain;
 
-  const handleAddSale = async () => {
-    if (!formCustomer || !formCartons || !formPrice) return;
-    const { date, time } = nowStr(); const pallet = getCurrentPallet(totalSold);
-    await addSale({ customer: formCustomer, cartons: parseInt(formCartons), price: parseFloat(formPrice), payType: formPayType, user: currentUser, date, time, pallet });
-    if (formPayType === "consignment") await addDebt({ customer: formCustomer, cartons: parseInt(formCartons), amount: parseFloat(formPrice), pallet, loggedBy: ACCOUNTS[currentUser].name, date, time, settled: false, settledDate: null });
-    setFormCustomer(""); setFormCartons(""); setFormPrice(""); setFormPayType("paid"); setShowForm(false);
+  // Business computed
+  const moRevenue = revenue.filter(r => { const d = new Date(r.date); return d.getMonth() === cMo && d.getFullYear() === cYr; });
+  const totalRev = moRevenue.reduce((s, r) => s + r.amt, 0);
+  const profit = totalRev - totSpent;
+  const unpaidInv = invoices.filter(i => !i.paid);
+  const paidInv = invoices.filter(i => i.paid);
+  const taxExps = moExps.filter(e => e.taxDeduct);
+
+  // Voice
+  const startListen = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { alert("Voice not supported. Try Chrome on Android, or Safari 14.1+ on iPhone!"); return; }
+    const r = new SR();
+    r.continuous = false;
+    r.interimResults = false;
+    r.lang = "en-US";
+    r.onstart = () => setListening(true);
+    r.onresult = ev => {
+      const transcript = ev.results[0][0].transcript.toLowerCase();
+      setListening(false);
+      // Parse the voice input
+      const amtMatch = transcript.match(/(\d+\.?\d*)/);
+      const amt = amtMatch ? parseFloat(amtMatch[1]) : 0;
+      let foundCat = "";
+      const currentCats = cats;
+      for (const c of currentCats) { if (transcript.includes(c.name.toLowerCase())) { foundCat = c.name; break; } }
+      if (!foundCat) {
+        const kw = { Food:["food","lunch","dinner","breakfast","coffee","groceries","eat","snack","meal","restaurant"],Transport:["uber","taxi","bus","gas","fuel","ride","train"],Housing:["rent","mortgage"],Entertainment:["movie","netflix","game","concert"],Shopping:["shop","buy","bought","amazon","clothes"],Health:["doctor","medicine","gym","pharmacy"],Utilities:["bill","internet","phone","electric","water"],Education:["book","course","school","tuition"],Travel:["flight","hotel","trip","travel","vacation"] };
+        for (const [k, ws] of Object.entries(kw)) if (ws.some(w => transcript.includes(w)) && currentCats.find(c => c.name === k)) { foundCat = k; break; }
+      }
+      if (!foundCat) foundCat = "Other";
+      let desc = transcript.replace(/\d+\.?\d*/, "").replace(foundCat.toLowerCase(), "").trim();
+      if (!desc) desc = transcript;
+      if (amt > 0) {
+        const newExp = { id: Date.now(), amt, cur: bCurr, convAmt: amt, desc: desc.charAt(0).toUpperCase()+desc.slice(1), category: foundCat, date: new Date().toISOString() };
+        setExps(p => [newExp, ...p]);
+        setShowAdd(false);
+      } else {
+        setEDesc(desc);
+        if (foundCat) setECat(foundCat);
+      }
+    };
+    r.onerror = (e) => { console.log("Speech error:", e.error); setListening(false); };
+    r.onend = () => setListening(false);
+    recRef.current = r;
+    r.start();
   };
-  const handleCompleteLog = async () => {
-    if (!completePrice || !completeCustomer) return;
-    const log = activeLogs.find((l) => l.id === showCompleteForm); if (!log) return;
-    const { date, time } = nowStr(); const pallet = getCurrentPallet(totalSold);
-    await addSale({ customer: completeCustomer, cartons: log.cartons, price: parseFloat(completePrice), payType: completePayType, user: currentUser, activeUser: log.user, date, time, pallet });
-    await completeActiveLog(log.id);
-    if (completePayType === "consignment") await addDebt({ customer: completeCustomer, cartons: log.cartons, amount: parseFloat(completePrice), pallet, loggedBy: ACCOUNTS[currentUser].name, date, time, settled: false, settledDate: null });
-    setCompleteCustomer(""); setCompletePrice(""); setCompletePayType("paid"); setShowCompleteForm(null);
+
+  // Receipt photo (reference only)
+  const onReceipt = ev => {
+    const f = ev.target.files?.[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = e => { setRcImg(e.target.result); };
+    r.readAsDataURL(f);
   };
-  const handleAddManualDebt = async () => { if (!debtName || !debtAmount) return; const { date, time } = nowStr(); await addDebt({ customer: debtName, cartons: null, amount: parseFloat(debtAmount), pallet: getCurrentPallet(totalSold), loggedBy: ACCOUNTS[currentUser].name, date, time, note: debtNote, settled: false, settledDate: null }); setDebtName(""); setDebtAmount(""); setDebtNote(""); setShowDebtForm(false); };
-  const handleAddDelivery = async () => { if (!deliveryQty) return; const { date, time } = nowStr(); await addActiveLog({ cartons: parseInt(deliveryQty), user: currentUser, date, time, status: "pending" }); setDeliveryQty(""); };
-  const handleSaveSettings = async () => { const s = parseInt(editStock), d = editDate, c = parseInt(editCPN); if (!s || !d || !c) return; await updateConfig({ totalStock: s, stockDate: d, cartonsPerPallet: c }); const { date, time } = nowStr(); await addStockHistory({ totalStock: s, stockDate: d, cartonsPerPallet: c, updatedBy: ACCOUNTS[currentUser].name, date, time }); setSettingsSaved(true); setTimeout(() => setSettingsSaved(false), 2000); };
-  const handleEditLog = async () => { if (!showEditLog) return; if (showEditLog.type === "active") await editActiveLog(showEditLog.id, { cartons: parseInt(editLogCartons) }); else { const u = {}; if (editLogCartons) u.cartons = parseInt(editLogCartons); if (editLogCustomer) u.customer = editLogCustomer; if (editLogPrice) u.price = parseFloat(editLogPrice); await editSale(showEditLog.id, u); } setShowEditLog(null); setExpanded(null); };
-  const handleEditHistoryEntry = async () => { if (!showEditHistory) return; const isCurrent = showEditHistory.totalStock === config.totalStock && showEditHistory.stockDate === config.stockDate; await editStockHistory(showEditHistory.id, { totalStock: parseInt(editHistoryStock), stockDate: editHistoryDate, cartonsPerPallet: parseInt(editHistoryCPN) }, isCurrent); setShowEditHistory(null); setExpanded(null); };
 
-  const tc = theme === "light" ? "light" : "";
+  const clrReceipt = () => { setRcImg(null); if (fileRef.current) fileRef.current.value=""; if (camRef.current) camRef.current.value=""; };
 
-  if (!currentUser) return (
-    <div className={`${tc} min-h-screen flex flex-col items-center justify-center px-5`} style={{ background: "var(--bg)" }}>
-      <div className="w-16 h-16 rounded-[20px] flex items-center justify-center mb-5" style={{ background: "linear-gradient(135deg, #4ECDC4, #44B8B0)" }}><span className="text-[28px] font-bold text-black">S</span></div>
-      <h1 className="text-[32px] font-bold tracking-tight mb-1" style={{ color: "var(--text)" }}>StockSync</h1>
-      <p className="text-[13px] mb-9" style={{ color: "var(--text-muted)" }}>Sign in to continue</p>
-      <div className="w-full max-w-[320px]">
-        <div className="text-[11px] uppercase tracking-[1.5px] mb-2" style={{ color: "var(--text-sub)" }}>Username</div>
-        <input type="text" value={loginInput} onChange={(e) => { setLoginInput(e.target.value); setLoginError(""); }} onKeyDown={(e) => e.key === "Enter" && handleLogin()} placeholder="Enter your username"
-          className="w-full px-4 py-4 rounded-[14px] text-base outline-none mb-1" style={{ border: `1px solid ${loginError ? "#FF6B6B" : "var(--input-border)"}`, background: "var(--input-bg)", color: "var(--text)" }} />
-        {loginError && <p className="text-xs mt-1 mb-2" style={{ color: "#FF6B6B" }}>{loginError}</p>}
-        <button onClick={handleLogin} className="w-full py-4 rounded-[14px] text-[15px] font-bold mt-3 active:scale-[0.98]" style={{ background: "linear-gradient(135deg, #4ECDC4, #44B8B0)", color: "#0A0A0B" }}>Sign In →</button>
-      </div>
-      <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="mt-8 text-xs flex items-center gap-1.5 bg-transparent border-none cursor-pointer" style={{ color: "var(--text-muted)" }}>{theme === "dark" ? "☀️ Light" : "🌙 Dark"}</button>
-    </div>
-  );
+  const addExpense = () => {
+    const d = detectCurrency(eAmt);
+    const a = d.amount || parseFloat(eAmt);
+    if (!a || !eCat) return;
+    const cur = d.currency || eCurr;
+    setExps(p => [{ id: Date.now(), amt: a, cur, convAmt: cnv(a, cur, bCurr), desc: eDesc || eCat, category: eCat, date: new Date().toISOString(), taxDeduct: bizMode && eIsTax }, ...p]);
+    setEAmt(""); setEDesc(""); setECat(""); setEIsTax(false); clrReceipt(); setShowAdd(false);
+  };
 
-  const user = ACCOUNTS[currentUser];
-  if (loading) return <div className={`${tc} min-h-screen flex items-center justify-center`} style={{ background: "var(--bg)" }}><p className="text-sm" style={{ color: "var(--text-muted)" }}>Loading...</p></div>;
+  const delExp = id => setExps(p => p.filter(e => e.id !== id));
 
-  // ACTIVE USER VIEW
-  if (!isPro) {
-    const myLogs = activeLogs.filter((l) => l.user === currentUser);
-    const myTotal = myLogs.filter((l) => !l.deleteRequested).reduce((s, l) => s + (l.cartons || 0), 0);
+  const finishOb = () => {
+    const sel = DEF_CATS.filter(c => obCats.includes(c.name));
+    setUName(obName); setBCurr(obCurr); setECurr(obCurr);
+    setCats(sel.length > 0 ? sel : DEF_CATS);
+    setBudget(parseFloat(obBdgt) || 5000); setOnboarded(true);
+  };
+
+  // Alerts check
+  useEffect(() => {
+    if (!onboarded || moExps.length === 0) return;
+    if (pct >= alertAt) {
+      const m = "Alert: " + pct.toFixed(0) + "% budget used!";
+      if (!alerts.find(a => a.m === m && new Date(a.d).getDate() === cDay)) {
+        setAlerts(p => [{ m, d: new Date().toISOString(), type: "alert" }, ...p].slice(0, 20));
+        if (notifOn && "Notification" in window && Notification.permission === "granted") new Notification("Budget Alert!", { body: m });
+      }
+    } else if (pct >= warnAt) {
+      const m = "Warning: " + pct.toFixed(0) + "% budget used.";
+      if (!alerts.find(a => a.m === m && new Date(a.d).getDate() === cDay)) {
+        setAlerts(p => [{ m, d: new Date().toISOString(), type: "warning" }, ...p].slice(0, 20));
+        if (notifOn && "Notification" in window && Notification.permission === "granted") new Notification("Budget Warning", { body: m });
+      }
+    }
+  }, [totSpent]);
+
+  const reqNotif = async () => {
+    if (!("Notification" in window)) return;
+    const p = await Notification.requestPermission();
+    if (p === "granted") { setNotifOn(true); new Notification("Notifications on!", { body: "You'll get budget alerts." }); }
+  };
+
+  // Charts
+  const catChartData = Object.entries(catTotals).sort((a, b) => b[1] - a[1]);
+  const weekChartData = (() => {
+    const w = {};
+    moExps.forEach(e => { const d = new Date(e.date).getDate(); const k = d<=7?"Wk 1":d<=14?"Wk 2":d<=21?"Wk 3":"Wk 4"; w[k] = (w[k]||0) + e.convAmt; });
+    return Object.entries(w);
+  })();
+  const moChartData = (() => {
+    const m = {};
+    exps.filter(e => new Date(e.date).getFullYear() === cYr).forEach(e => { const k = MO_NAMES[new Date(e.date).getMonth()]; m[k] = (m[k]||0) + e.convAmt; });
+    return Object.entries(m).sort((a, b) => MO_NAMES.indexOf(a[0]) - MO_NAMES.indexOf(b[0]));
+  })();
+
+  // Insights
+  const insights = (() => {
+    if (moExps.length === 0) return ["📊 Add expenses to get insights!"];
+    const r = [], mp = (cDay / dInMo) * 100;
+    r.push(pct > mp + 10 ? ("⚠️ Overspending: "+pct.toFixed(0)+"% used, "+mp.toFixed(0)+"% of month gone.") : ("✅ On Track: "+pct.toFixed(0)+"% used, "+mp.toFixed(0)+"% of month gone."));
+    const so = Object.entries(catTotals).sort((a,b) => b[1]-a[1]);
+    if (so.length > 0) r.push("🔥 Top: "+(cats.find(c=>c.name===so[0][0])?.emoji||"")+" "+so[0][0]+" at "+fmtM(so[0][1],bCurr));
+    const av = totSpent / cDay, pr = av * dInMo;
+    r.push(pr > budget ? ("💸 Forecast: "+fmtM(pr,bCurr)+" — "+fmtM(pr-budget,bCurr)+" over.") : ("💰 Save "+fmtM(budget-pr,bCurr)+" this month!"));
+    r.push("📈 Daily: "+fmtM(av,bCurr)+"/day vs "+fmtM(budget/dInMo,bCurr)+"/day target.");
+    const lf = dInMo - cDay;
+    if (lf > 0 && remain > 0) r.push("🗓️ "+fmtM(remain,bCurr)+" left for "+lf+" days.");
+    return r;
+  })();
+
+  // Report
+  const report = (() => {
+    const r = [];
+    r.push("📅 " + FULL_MO[cMo] + " " + cYr + " Report");
+    r.push("💰 Overview\nTotal: "+fmtM(totSpent,bCurr)+"\nBudget: "+fmtM(budget,bCurr)+"\nRemaining: "+fmtM(remain,bCurr)+"\nUsed: "+pct.toFixed(0)+"%");
+    r.push("📊 "+moExps.length+" transactions · "+fmtM(totSpent/Math.max(cDay,1),bCurr)+"/day avg");
+    if (Object.keys(catTotals).length > 0) {
+      r.push("📋 Categories\n" + Object.entries(catTotals).sort((a,b)=>b[1]-a[1]).map(([c,a])=>(cats.find(x=>x.name===c)?.emoji||"")+" "+c+": "+fmtM(a,bCurr)+" ("+((a/totSpent)*100).toFixed(0)+"%)").join("\n"));
+    }
+    const g = pct<50?"A+ 🌟":pct<60?"A 🌟":pct<70?"B+ 👍":pct<80?"B 👍":pct<90?"C 😬":"D 😱";
+    r.push("🏆 Grade: " + g);
+    return r;
+  })();
+
+  // Styles
+  const inp = { width:"100%", padding:"14px 16px", borderRadius:12, border:"1px solid "+t.bd, background:t.ip, color:t.tx, fontSize:16, outline:"none", boxSizing:"border-box" };
+  const btn = (bg) => ({ width:"100%", padding:"16px", borderRadius:14, background:bg||t.ac, color:"#fff", border:"none", fontSize:16, fontWeight:600, cursor:"pointer" });
+  const crd = { background:t.cd, border:"1px solid "+t.bd, borderRadius:16, padding:16 };
+  const mic = (on) => ({ width:52, height:52, borderRadius:"50%", background:on?t.rd:t.al, border:"2px solid "+(on?t.rd:t.bd), color:on?"#fff":t.tx, fontSize:22, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", animation:on?"pulse 1.5s infinite":"none" });
+  const modBg = { position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"flex-end", justifyContent:"center", zIndex:100, backdropFilter:"blur(4px)" };
+  const sheet = { width:"100%", maxWidth:480, maxHeight:"90vh", overflow:"auto", background:t.cd, borderRadius:"24px 24px 0 0", padding:20, animation:"slideUp 0.3s ease" };
+  const pill = (on) => ({ padding:"8px 16px", borderRadius:20, background:on?t.ac:t.al, color:on?"#fff":t.sc, border:"1px solid "+(on?t.ac:t.bd), cursor:"pointer", fontSize:13, fontWeight:500 });
+  const tog = (on) => ({ width:48, height:26, borderRadius:13, background:on?t.ac:t.bd, position:"relative", cursor:"pointer", transition:"all 0.3s", flexShrink:0 });
+  const togD = (on) => ({ width:20, height:20, borderRadius:"50%", background:"#fff", position:"absolute", top:3, left:on?25:3, transition:"all 0.3s" });
+  const handle = { width:40, height:4, borderRadius:2, background:t.bd, margin:"0 auto 16px" };
+
+  // Chart component
+  const Chart = ({ data, colorFn }) => {
+    if (!data || data.length === 0) return <div style={{ textAlign:"center", padding:40, color:t.sc }}>No data yet</div>;
+    const mx = Math.max(...data.map(d => d[1]));
     return (
-      <div className={`${tc} min-h-screen max-w-[440px] mx-auto pb-10`} style={{ background: "var(--bg)", color: "var(--text)" }}>
-        <div className="flex justify-between items-center px-5 pt-6 pb-4">
-          <div><h1 className="text-[22px] font-bold tracking-tight">StockSync</h1><p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>Welcome back</p></div>
-          <div className="flex items-center gap-2.5">
-            <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="text-lg p-1 bg-transparent border-none cursor-pointer">{theme === "dark" ? "☀️" : "🌙"}</button>
-            <button onClick={handleLogout} className="w-9 h-9 rounded-[10px] flex items-center justify-center text-sm font-bold border-none cursor-pointer" style={{ background: `${user.color}20`, color: user.color }}>{user.initial}</button>
-          </div>
-        </div>
-        <div className="px-5">
-          <div className="flex gap-2.5 mb-5">
-            <Stat label="My Logs" value={myTotal} sub="cartons total" accent={user.color} />
-            <Stat label="Pending" value={myLogs.filter((l) => l.status === "pending" && !l.deleteRequested).length} sub="awaiting review" accent="#FF9F43" />
-          </div>
-          <div className="rounded-[20px] p-5 mb-6" style={{ background: `${user.color}0C`, border: `1px solid ${user.color}20` }}>
-            <h2 className="text-base font-bold mb-4">Log Cartons</h2>
-            <div className="text-[11px] uppercase tracking-[1.5px] mb-2" style={{ color: "var(--text-sub)" }}>Number of Cartons</div>
-            <div className="flex gap-2.5">
-              <input type="number" value={deliveryQty} onChange={(e) => setDeliveryQty(e.target.value)} placeholder="e.g. 25" className="flex-1 px-4 py-3.5 rounded-xl font-mono text-lg outline-none" style={{ border: "1px solid var(--input-border)", background: "var(--input-bg)", color: "var(--text)" }} />
-              <button onClick={handleAddDelivery} className="px-6 py-3.5 rounded-xl text-sm font-bold border-none cursor-pointer active:scale-95" style={{ background: `linear-gradient(135deg, ${user.color}, ${user.color}CC)`, color: "#0A0A0B" }}>Log ✓</button>
+      <div style={{ display:"flex", alignItems:"flex-end", gap:6, height:200, padding:"10px 0" }}>
+        {data.map(([label, val], i) => {
+          const h = mx > 0 ? (val / mx) * 150 : 0;
+          const cl = colorFn(label, i);
+          const catObj = cats.find(c => c.name === label);
+          return (
+            <div key={label} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+              <span style={{ fontSize:9, color:t.sc, fontWeight:600 }}>{fmtM(val, bCurr)}</span>
+              <div style={{ width:"100%", maxWidth:34, height:h, borderRadius:"6px 6px 0 0", background:"linear-gradient(180deg,"+cl+","+cl+"88)", transition:"height 0.5s" }} />
+              <span style={{ fontSize:14 }}>{catObj?.emoji || ""}</span>
+              <span style={{ fontSize:8, color:t.sc, textAlign:"center" }}>{label}</span>
             </div>
-          </div>
-          <div className="text-[11px] uppercase tracking-[1.5px] mb-3" style={{ color: "var(--text-sub)" }}>My Log History</div>
-          {myLogs.length === 0 && <div className="text-center py-8 text-sm" style={{ color: "var(--text-muted)" }}>No logs yet.</div>}
-          {myLogs.map((l) => (
-            <div key={l.id} className="rounded-[14px] mb-2 overflow-hidden" style={{ background: l.deleteRequested ? "rgba(255,107,107,0.04)" : "var(--card)", border: `1px solid ${l.deleteRequested ? "rgba(255,107,107,0.15)" : expanded === l.id ? `${user.color}40` : "var(--card-border)"}` }}>
-              <div className="px-4 py-3.5 flex justify-between items-center cursor-pointer" onClick={() => toggle(l.id)}>
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-[10px] flex items-center justify-center text-base" style={{ background: `${user.color}15` }}>📦</div>
-                  <div><div className="text-[15px] font-bold font-mono">{l.cartons} cartons</div><div className="text-[11px] mt-0.5" style={{ color: "var(--text-muted)" }}>{l.date} · {l.time}</div></div>
-                </div>
-                <div className="text-[10px] px-2.5 py-1 rounded-md uppercase font-semibold" style={{ color: l.deleteRequested ? "#FF6B6B" : l.status === "pending" ? "#FF9F43" : "#4ECDC4", background: l.deleteRequested ? "rgba(255,107,107,0.1)" : l.status === "pending" ? "rgba(255,159,67,0.1)" : "rgba(78,205,196,0.1)" }}>{l.deleteRequested ? "🗑 Pending" : l.status === "pending" ? "⏳ Pending" : "✓ Done"}</div>
-              </div>
-              {expanded === l.id && !l.deleteRequested && (
-                <div className="px-4 pb-3.5 flex gap-2">
-                  <button onClick={() => { setShowEditLog({ type: "active", id: l.id, cartons: l.cartons }); setEditLogCartons(String(l.cartons)); }} className="flex-1 py-2.5 rounded-lg text-[11px] font-semibold border-none cursor-pointer" style={{ background: "var(--input-bg)", color: "var(--text-sub)" }}>✏️ Edit</button>
-                  <button onClick={() => askDelete(`${l.cartons} cartons — ${l.date}`, () => requestDeleteActiveLog(l.id, ACCOUNTS[currentUser].name))} className="flex-1 py-2.5 rounded-lg text-[11px] font-semibold border-none cursor-pointer" style={{ background: "rgba(255,107,107,0.06)", color: "#FF6B6B" }}>🗑 Delete</button>
-                </div>
-              )}
-              {l.deleteRequested && expanded === l.id && <div className="px-4 pb-3 text-[11px] text-center py-2 rounded-lg mx-4 mb-3" style={{ background: "rgba(255,107,107,0.06)", color: "#FF6B6B" }}>Waiting for admin approval</div>}
-            </div>
-          ))}
-          <button onClick={handleLogout} className="w-full mt-6 py-3.5 rounded-xl text-[13px] cursor-pointer" style={{ border: "1px solid var(--input-border)", background: "transparent", color: "var(--text-muted)" }}>Sign Out</button>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // Transaction row
+  const TxRow = ({ e, canDel }) => {
+    const c = cats.find(x => x.name === e.category);
+    return (
+      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 14px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:8 }}>
+        <div style={{ width:40, height:40, borderRadius:12, background:t.al, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20 }}>{c?.emoji || "💰"}</div>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontWeight:600, fontSize:14, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{e.desc}</div>
+          <div style={{ fontSize:12, color:t.sc }}>{c?.name} · {new Date(e.date).toLocaleDateString("en",{month:"short",day:"numeric"})}{e.cur !== bCurr ? (" · "+(CURRENCIES.find(x=>x.code===e.cur)?.symbol||"")+e.amt) : ""}{e.taxDeduct ? " · 📋 Tax" : ""}</div>
         </div>
-        {showEditLog && <Modal onClose={() => setShowEditLog(null)}><h2 className="text-lg font-bold mb-5" style={{ color: "var(--text)" }}>Edit Log</h2><Input label="Cartons" value={editLogCartons} onChange={setEditLogCartons} placeholder="e.g. 25" type="number" mono /><button onClick={handleEditLog} className="w-full py-4 rounded-[14px] text-[15px] font-bold border-none cursor-pointer active:scale-[0.98]" style={{ background: "linear-gradient(135deg, #4ECDC4, #44B8B0)", color: "#0A0A0B" }}>Save →</button></Modal>}
-        {confirmDelete && <Modal onClose={() => setConfirmDelete(null)}><div className="text-center mb-5"><div className="text-3xl mb-3">🗑</div><h2 className="text-lg font-bold mb-2" style={{ color: "var(--text)" }}>Confirm Delete</h2><p className="text-sm" style={{ color: "var(--text-muted)" }}>This cannot be undone.</p><p className="text-sm font-semibold mt-2" style={{ color: "#FF6B6B" }}>{confirmDelete.label}</p></div><div className="flex gap-3"><button onClick={() => setConfirmDelete(null)} className="flex-1 py-3.5 rounded-[14px] text-sm font-bold border-none cursor-pointer" style={{ background: "var(--card)", border: "1px solid var(--card-border)", color: "var(--text-sub)" }}>Cancel</button><button onClick={doDelete} className="flex-1 py-3.5 rounded-[14px] text-sm font-bold border-none cursor-pointer" style={{ background: "linear-gradient(135deg, #FF6B6B, #FF4757)", color: "#fff" }}>Delete</button></div></Modal>}
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          <span style={{ fontWeight:700, color:t.rd, fontSize:15, whiteSpace:"nowrap" }}>-{fmtM(e.convAmt, bCurr)}</span>
+          {canDel && <span style={{ cursor:"pointer", color:t.sc, padding:4, fontSize:14 }} onClick={() => delExp(e.id)}>✕</span>}
+        </div>
+      </div>
+    );
+  };
+
+  const css = "@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0}@keyframes fadeIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}@keyframes spin{to{transform:rotate(360deg)}}input:focus,select:focus{border-color:#6C63FF!important;outline:none}::-webkit-scrollbar{width:0}input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}input[type=number]{-moz-appearance:textfield}input[type=range]{-webkit-appearance:auto;appearance:auto;background:transparent;border:none;padding:0}";
+
+  // ===================== ONBOARDING =====================
+  if (!onboarded) {
+    const wrap = { minHeight:"100vh", background:t.bg, color:t.tx, fontFamily:"'DM Sans',sans-serif", maxWidth:480, margin:"0 auto", display:"flex", flexDirection:"column", justifyContent:"center", padding:24 };
+    return (
+      <div style={wrap}>
+        <style>{css}</style>
+        {obStep === 0 && (
+          <div style={{ textAlign:"center", animation:"fadeIn 0.5s" }}>
+            <div style={{ fontSize:64, marginBottom:16 }}>💰</div>
+            <h1 style={{ fontSize:28, fontWeight:700, marginBottom:8 }}>Your Budget Tracker</h1>
+            <p style={{ color:t.sc, marginBottom:32 }}>Smart. Simple. Secure.</p>
+            <input style={inp} placeholder="What's your name?" value={obName} onChange={e => setObName(e.target.value)} />
+            <button style={{ ...btn(), marginTop:20, opacity:obName?1:0.5 }} onClick={() => obName && setObStep(1)}>Get Started →</button>
+          </div>
+        )}
+        {obStep === 1 && (
+          <div style={{ animation:"fadeIn 0.5s" }}>
+            <h2 style={{ fontSize:22, fontWeight:700, marginBottom:4 }}>Hey {obName}! 👋</h2>
+            <p style={{ color:t.sc, marginBottom:20 }}>Pick your base currency</p>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:10, maxHeight:360, overflow:"auto" }}>
+              {CURRENCIES.map(c => (
+                <div key={c.code} onClick={() => setObCurr(c.code)} style={{ padding:14, borderRadius:14, background:obCurr===c.code?t.ac:t.cd, border:"1px solid "+(obCurr===c.code?t.ac:t.bd), color:obCurr===c.code?"#fff":t.tx, cursor:"pointer", textAlign:"center" }}>
+                  <div style={{ fontSize:18, fontWeight:600 }}>{c.symbol}</div>
+                  <div style={{ fontSize:12, opacity:0.8 }}>{c.code} · {c.name}</div>
+                </div>
+              ))}
+            </div>
+            <button style={{ ...btn(), marginTop:20 }} onClick={() => setObStep(2)}>Next →</button>
+          </div>
+        )}
+        {obStep === 2 && (
+          <div style={{ animation:"fadeIn 0.5s" }}>
+            <h2 style={{ fontSize:22, fontWeight:700, marginBottom:4 }}>Choose categories</h2>
+            <p style={{ color:t.sc, marginBottom:20 }}>Tap to toggle</p>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:10 }}>
+              {DEF_CATS.map(cat => {
+                const on = obCats.includes(cat.name);
+                return (
+                  <div key={cat.name} onClick={() => on ? setObCats(p=>p.filter(c=>c!==cat.name)) : setObCats(p=>[...p,cat.name])} style={{ padding:14, borderRadius:14, background:on?t.ac:t.cd, border:"1px solid "+(on?t.ac:t.bd), color:on?"#fff":t.tx, cursor:"pointer", display:"flex", alignItems:"center", gap:10 }}>
+                    <span style={{ fontSize:22 }}>{cat.emoji}</span>
+                    <span style={{ fontWeight:500 }}>{cat.name}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <button style={{ ...btn(), marginTop:20, opacity:obCats.length>0?1:0.5 }} onClick={() => obCats.length>0 && setObStep(3)}>Next →</button>
+          </div>
+        )}
+        {obStep === 3 && (
+          <div style={{ textAlign:"center", animation:"fadeIn 0.5s" }}>
+            <div style={{ fontSize:48, marginBottom:12 }}>🎯</div>
+            <h2 style={{ fontSize:22, fontWeight:700, marginBottom:4 }}>Monthly budget</h2>
+            <p style={{ color:t.sc, marginBottom:24 }}>In {(CURRENCIES.find(c=>c.code===obCurr)||{}).symbol}{obCurr}</p>
+            <input style={{ ...inp, fontSize:32, textAlign:"center", fontWeight:700 }} type="number" value={obBdgt} onChange={e => setObBdgt(e.target.value)} />
+            <button style={{ ...btn(), marginTop:24 }} onClick={() => setObStep(4)}>Let's Go! 🚀</button>
+          </div>
+        )}
+        {obStep === 4 && (
+          <div style={{ textAlign:"center", animation:"fadeIn 0.5s" }}>
+            <div style={{ fontSize:48, marginBottom:12 }}>💎</div>
+            <h2 style={{ fontSize:22, fontWeight:700, marginBottom:4 }}>Go Pro?</h2>
+            <p style={{ color:t.sc, marginBottom:20 }}>Unlock powerful features</p>
+            <div style={{ textAlign:"left", marginBottom:20 }}>
+              {["🧾 Auto receipt scanning","🔁 Recurring expenses (rent, bills)","🏠 Budget pre-allocation","🎯 Category spending limits","📤 Export CSV & PDF"].map(f => (
+                <div key={f} style={{ padding:"10px 14px", borderRadius:10, background:t.cd, border:"1px solid "+t.bd, marginBottom:6, fontSize:13, display:"flex", alignItems:"center", gap:10 }}>
+                  <span>{f}</span>
+                </div>
+              ))}
+            </div>
+            <button style={{ ...btn(), marginBottom:10, background:"linear-gradient(135deg,#6C63FF,#8b7aff)" }} onClick={() => setShowUpgrade(true)}>Upgrade to Pro 💎</button>
+            <button style={{ background:"none", border:"none", color:t.sc, fontSize:14, cursor:"pointer", padding:10 }} onClick={finishOb}>Skip for now →</button>
+          </div>
+        )}
+        <div style={{ display:"flex", justifyContent:"center", gap:8, marginTop:24 }}>
+          {[0,1,2,3,4].map(i => <div key={i} style={{ width:i===obStep?24:8, height:8, borderRadius:4, background:i===obStep?t.ac:t.bd, transition:"all 0.3s" }} />)}
+        </div>
       </div>
     );
   }
 
-  // PRO VIEW
+  // ===================== MAIN APP =====================
   return (
-    <div className={`${tc} min-h-screen max-w-[440px] mx-auto relative pb-[90px]`} style={{ background: "var(--bg)", color: "var(--text)" }}>
-      <div className="flex justify-between items-center px-5 pt-6 pb-4">
-        <div><h1 className="text-[22px] font-bold tracking-tight">StockSync</h1><p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>{activeTab === "dashboard" ? "Dashboard" : activeTab === "debts" ? "Debts" : activeTab === "insights" ? "Insights" : activeTab === "history" ? "History" : activeTab === "approvals" ? "Approvals" : "Settings"}</p></div>
-        <div className="flex items-center gap-2.5">
-          {isAdmin && deleteRequests.length > 0 && <button onClick={() => setActiveTab("approvals")} className="px-2.5 py-1 rounded-lg text-[10px] font-bold border-none cursor-pointer" style={{ background: "rgba(255,107,107,0.15)", color: "#FF6B6B" }}>🗑 {deleteRequests.length}</button>}
-          <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="text-lg p-1 bg-transparent border-none cursor-pointer">{theme === "dark" ? "☀️" : "🌙"}</button>
-          <button onClick={handleLogout} className="w-9 h-9 rounded-[10px] flex items-center justify-center text-sm font-bold border-none cursor-pointer" style={{ background: `linear-gradient(135deg, ${user.color}, ${user.color}CC)`, color: "#0A0A0B" }}>{user.initial}</button>
+    <div style={{ minHeight:"100vh", background:t.bg, color:t.tx, fontFamily:"'DM Sans',sans-serif", maxWidth:480, margin:"0 auto", position:"relative" }}>
+      <style>{css}</style>
+
+      {/* Header */}
+      <div style={{ padding:"16px 20px 0" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+          <div>
+            <div style={{ fontSize:13, color:t.sc }}>Welcome back</div>
+            <div style={{ fontSize:20, fontWeight:700 }}>{uName} 👋</div>
+          </div>
+          <button onClick={() => setDk(!dk)} style={{ background:t.al, border:"1px solid "+t.bd, borderRadius:12, padding:"8px 12px", color:t.tx, cursor:"pointer", fontSize:16 }}>{dk ? "☀️" : "🌙"}</button>
+        </div>
+        {/* Mode Switcher */}
+        <div style={{ display:"flex", gap:6, padding:4, borderRadius:14, background:t.al, border:"1px solid "+t.bd }}>
+          {[
+            { id:"personal", label:"Personal", icon:"👤", unlocked:true },
+            { id:"pro", label:"Pro", icon:"💎", unlocked:isPro },
+            { id:"business", label:"Business", icon:"💼", unlocked:isBiz },
+          ].map(m => (
+            <div key={m.id} onClick={() => {
+              if (m.id === "pro" && !isPro) { setShowUpgrade(true); return; }
+              if (m.id === "business" && !isBiz) { setShowBizUpgrade(true); return; }
+              setActiveMode(m.id);
+              if (m.id === "business") { setBizMode(true); setCats(DEF_BIZ_CATS); }
+              else { setBizMode(false); setCats(DEF_CATS); }
+            }} style={{
+              flex:1, padding:"8px 4px", borderRadius:10, textAlign:"center", cursor:"pointer",
+              background: activeMode===m.id ? (m.id==="business"?"linear-gradient(135deg,#f5af19,#f093fb)":m.id==="pro"?"linear-gradient(135deg,#6C63FF,#8b7aff)":t.cd) : "transparent",
+              color: activeMode===m.id ? "#fff" : t.sc,
+              transition:"all 0.2s"
+            }}>
+              <div style={{ fontSize:14 }}>{m.icon}{!m.unlocked && m.id!=="personal" ? "🔒" : ""}</div>
+              <div style={{ fontSize:10, fontWeight:600, marginTop:2 }}>{m.label}</div>
+            </div>
+          ))}
         </div>
       </div>
 
-      {activeTab === "dashboard" && (
-        <div className="px-5">
-          {TS === 0 ? (
-            <div className="rounded-[20px] p-5 mb-4 text-center" style={{ background: "linear-gradient(145deg, rgba(78,205,196,0.08), rgba(78,205,196,0.02))", border: "1px solid rgba(78,205,196,0.12)" }}>
-              <div className="text-2xl mb-2">📦</div><div className="text-base font-bold mb-1">No Stock Set Up Yet</div>
-              <div className="text-sm mb-3" style={{ color: "var(--text-muted)" }}>{isAdmin ? "Go to Settings to add stock." : "Waiting for admin."}</div>
-              {isAdmin && <button onClick={() => setActiveTab("settings")} className="px-5 py-2.5 rounded-xl text-sm font-bold border-none cursor-pointer" style={{ background: "linear-gradient(135deg, #4ECDC4, #44B8B0)", color: "#0A0A0B" }}>Settings →</button>}
-            </div>
-          ) : (<>
-            <div className="rounded-[14px] px-4 py-3.5 mb-3.5 flex justify-between items-center" style={{ background: "var(--card)", border: "1px solid var(--card-border)" }}>
-              <div><div className="text-[10px] uppercase tracking-[1.5px]" style={{ color: "var(--text-muted)" }}>Stock Received</div><div className="text-[13px] mt-0.5" style={{ color: "var(--text-sub)" }}>{SD} · <span className="font-mono font-bold" style={{ color: "var(--text)" }}>{TS.toLocaleString()}</span> cartons</div></div>
-              <div className="text-right"><div className="text-[10px] uppercase tracking-[1.5px]" style={{ color: "var(--text-muted)" }}>{TP} Pallets</div><div className="text-[11px] mt-0.5" style={{ color: "var(--text-sub)" }}>{CPN}/pallet</div></div>
-            </div>
-            <div className="rounded-[20px] px-5 pt-5 pb-4 mb-3.5" style={{ background: "linear-gradient(145deg, rgba(78,205,196,0.08), rgba(78,205,196,0.02))", border: "1px solid rgba(78,205,196,0.12)" }}>
-              <div className="flex justify-between items-start">
-                <div><div className="text-[11px] uppercase tracking-[1.5px] mb-1" style={{ color: "#4ECDC4" }}>Current Pallet</div><div className="text-[42px] font-bold font-mono leading-none">#{cPN}</div><div className="text-[13px] mt-1.5" style={{ color: "var(--text-muted)" }}><span className="font-mono font-semibold" style={{ color: "var(--text)" }}>{cPL}</span> of {CPN} left</div></div>
-                <div className="text-right"><div className="rounded-[10px] px-3 py-1.5 text-[13px] font-semibold font-mono" style={{ background: "rgba(78,205,196,0.1)", color: "#4ECDC4" }}>{cPP}%</div><div className="text-[11px] mt-1.5" style={{ color: "var(--text-muted)" }}>{pLeft} left</div></div>
+      {/* ========== HOME ========== */}
+      {pg === "home" && (
+        <div style={{ animation:"fadeIn 0.3s", paddingBottom:90 }}>
+          {/* Hero Card */}
+          <div style={{ margin:"8px 20px 16px", padding:24, borderRadius:20, background:"linear-gradient(135deg,"+t.ac+",#8b7aff)", position:"relative", overflow:"hidden" }}>
+            <div style={{ position:"absolute", top:-40, right:-40, width:120, height:120, borderRadius:"50%", background:"rgba(255,255,255,0.1)" }} />
+            <div style={{ position:"relative", zIndex:1 }}>
+              <div style={{ fontSize:13, color:"rgba(255,255,255,0.7)", marginBottom:4 }}>Spent This Month</div>
+              <div style={{ fontSize:36, fontWeight:700, color:"#fff" }}>{fmtM(totSpent, bCurr)}</div>
+              <div style={{ fontSize:14, color:"rgba(255,255,255,0.8)", marginTop:4 }}>Remaining: {fmtM(remain, bCurr)}</div>
+              <div style={{ width:"100%", height:10, borderRadius:5, background:"rgba(255,255,255,0.2)", overflow:"hidden", marginTop:12 }}>
+                <div style={{ height:"100%", borderRadius:5, width:pct+"%", background:bCol, transition:"width 0.6s, background 0.6s", boxShadow:pct>80?("0 0 8px "+t.rd):"none" }} />
               </div>
-              <div className="mt-4 mb-1.5 rounded-[20px] h-2.5 overflow-hidden" style={{ background: theme === "dark" ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.06)" }}>
-                <div className="h-full rounded-[20px] transition-all duration-700" style={{ width: `${cPP}%`, background: parseInt(cPP) > 80 ? "linear-gradient(90deg, #FF6B6B, #FF4757)" : "linear-gradient(90deg, #4ECDC4, #44B8B0)" }} />
+              <div style={{ display:"flex", justifyContent:"space-between", marginTop:6 }}>
+                <span style={{ fontSize:11, color:"rgba(255,255,255,0.5)" }}>0%</span>
+                <span style={{ fontSize:13, fontWeight:700, color:bCol }}>{pct.toFixed(0)}%</span>
+                <span style={{ fontSize:11, color:"rgba(255,255,255,0.5)" }}>100%</span>
               </div>
             </div>
-            <div className="mb-3.5">
-              <div className="text-[10px] uppercase tracking-[1.5px] mb-2" style={{ color: "var(--text-muted)" }}>All Pallets</div>
-              <div className="flex flex-wrap gap-1.5">
-                {pallets.map((p) => (
-                  <div key={p.num} className="relative">
-                    <div className="w-10 h-10 rounded-lg flex items-center justify-center text-[11px] font-bold font-mono" style={{ background: p.status === "sold" ? "rgba(255,107,107,0.15)" : p.status === "active" ? "rgba(78,205,196,0.15)" : "var(--card)", border: `1px solid ${p.status === "sold" ? "rgba(255,107,107,0.2)" : p.status === "active" ? "rgba(78,205,196,0.3)" : "var(--card-border)"}`, color: p.status === "sold" ? "#FF6B6B" : p.status === "active" ? "#4ECDC4" : "var(--text-faint)" }}>{p.num}</div>
-                    {palletHasDebt(p.num) && <button onClick={() => setActiveTab("debts")} className="absolute -top-1.5 -right-1.5 w-[18px] h-[18px] rounded-full flex items-center justify-center text-[9px] font-bold cursor-pointer p-0" style={{ background: "#FF9F43", border: "2px solid var(--bg)", color: "#0A0A0B" }}>₦</button>}
-                    {p.status === "active" && !palletHasDebt(p.num) && <div className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full pulse-dot" style={{ background: "#4ECDC4" }} />}
+          </div>
+
+          {/* Alert Banners */}
+          {pct >= alertAt && (
+            <div style={{ margin:"0 20px 12px", padding:"12px 16px", borderRadius:12, background:t.rd+"15", border:"1px solid "+t.rd+"40", display:"flex", alignItems:"center", gap:10 }}>
+              <span style={{ fontSize:22 }}>🚨</span>
+              <span style={{ fontSize:13, color:t.rd, fontWeight:500 }}>Budget alert! {pct.toFixed(0)}% used.</span>
+            </div>
+          )}
+          {pct >= warnAt && pct < alertAt && (
+            <div style={{ margin:"0 20px 12px", padding:"12px 16px", borderRadius:12, background:t.wn+"15", border:"1px solid "+t.wn+"40", display:"flex", alignItems:"center", gap:10 }}>
+              <span style={{ fontSize:22 }}>⚠️</span>
+              <span style={{ fontSize:13, color:t.wn, fontWeight:500 }}>Warning: {pct.toFixed(0)}% budget used.</span>
+            </div>
+          )}
+
+          {/* Pre-allocation card (Pro/Biz users) */}
+          {(isPro || isBiz) && recurring.length > 0 && (
+            <div style={{ margin:"0 20px 12px", padding:"14px 16px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                <div style={{ fontSize:13, fontWeight:600 }}>💎 Fixed Costs Pre-Allocated</div>
+                <span style={{ fontSize:12, color:t.sc }}>{fmtM(recurTotal, bCurr)}/mo</span>
+              </div>
+              <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:t.sc }}>
+                <span>Budget: {fmtM(budget, bCurr)}</span>
+                <span>Spendable: <span style={{ color:t.gn, fontWeight:600 }}>{fmtM(spendable, bCurr)}</span></span>
+              </div>
+            </div>
+          )}
+
+          {/* Category budget alerts (Pro) */}
+          {(isPro || isBiz) && Object.entries(catBudgets).filter(([cat, lim]) => lim > 0 && (catTotals[cat] || 0) >= lim * 0.85).length > 0 && (
+            <div style={{ padding:"0 20px", marginBottom:12 }}>
+              {Object.entries(catBudgets).filter(([cat, lim]) => lim > 0 && (catTotals[cat] || 0) >= lim * 0.85).map(([cat, lim]) => {
+                const spent = catTotals[cat] || 0;
+                const over = spent >= lim;
+                return (
+                  <div key={cat} style={{ padding:"10px 14px", borderRadius:10, background:(over?t.rd:t.wn)+"12", border:"1px solid "+(over?t.rd:t.wn)+"30", marginBottom:6, fontSize:12, display:"flex", alignItems:"center", gap:8 }}>
+                    <span>{cats.find(c=>c.name===cat)?.emoji}</span>
+                    <span style={{ color:over?t.rd:t.wn }}>{over?"🚨":"⚠️"} {cat}: {fmtM(spent,bCurr)} / {fmtM(lim,bCurr)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Daily Stats */}
+          <div style={{ display:"flex", gap:12, padding:"0 20px", marginBottom:16 }}>
+            <div style={{ ...crd, flex:1, textAlign:"center" }}>
+              <div style={{ fontSize:11, color:t.sc, marginBottom:4 }}>Daily Budget</div>
+              <div style={{ fontSize:20, fontWeight:700, color:t.gn }}>{fmtM(dBudget, bCurr)}</div>
+            </div>
+            <div style={{ ...crd, flex:1, textAlign:"center" }}>
+              <div style={{ fontSize:11, color:t.sc, marginBottom:4 }}>Today</div>
+              <div style={{ fontSize:20, fontWeight:700, color:todaySpent>dBudget?t.rd:t.gn }}>{fmtM(todaySpent, bCurr)}</div>
+            </div>
+          </div>
+
+          {/* Categories */}
+          <div style={{ padding:"0 20px", marginBottom:16 }}>
+            <div style={{ fontSize:16, fontWeight:600, marginBottom:10 }}>Categories</div>
+            {[cats.slice(0,5), cats.slice(5)].filter(r => r.length > 0).map((row, ri) => (
+              <div key={ri} style={{ display:"grid", gridTemplateColumns:"repeat("+Math.min(row.length,5)+",1fr)", gap:8, marginBottom:ri===0?8:0 }}>
+                {row.map(cat => (
+                  <div key={cat.name} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4, padding:"10px 4px", borderRadius:12, background:t.cd, border:"1px solid "+t.bd }}>
+                    <span style={{ fontSize:22 }}>{cat.emoji}</span>
+                    <span style={{ fontSize:9, color:t.sc }}>{cat.name}</span>
+                    <span style={{ fontSize:11, fontWeight:600, color:(catTotals[cat.name]||0)>0?t.rd:t.gn }}>{fmtM(catTotals[cat.name]||0, bCurr)}</span>
                   </div>
                 ))}
               </div>
+            ))}
+          </div>
+
+          {/* Recent 4 Transactions */}
+          <div style={{ padding:"0 20px" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+              <span style={{ fontSize:16, fontWeight:600 }}>Recent Transactions</span>
+              {moExps.length > 4 && <span style={{ fontSize:13, color:t.ac, cursor:"pointer" }} onClick={() => setPg("stats")}>See All →</span>}
             </div>
-            <div className="flex gap-2.5 mb-3.5">
-              <Stat label="Paid Revenue" value={fmt(paidRevenue)} sub={`${liveSales.filter((l) => l.payType === "paid").length} sales`} accent="#4ECDC4" />
-              <Stat label="Debts Owed" value={fmt(totalDebtOwed)} sub={`${unsettledDebts.length} pending`} accent="#FF9F43" />
-            </div>
-            <div className="rounded-[14px] px-4 py-3.5 mb-5 flex justify-between items-center" style={{ background: "var(--card)", border: "1px solid var(--card-border)" }}>
-              <div><div className="text-[10px] uppercase tracking-[1.5px]" style={{ color: "var(--text-muted)" }}>Stock Left</div><div className="text-[13px] mt-0.5"><span className="font-mono font-bold text-lg">{stockLeft}</span> / {TS}</div></div>
-              <div className="font-mono text-[13px]" style={{ color: "var(--text-sub)" }}>{totalSold} sold</div>
-            </div>
-          </>)}
-          {pendingActive.length > 0 && (<>
-            <div className="text-[11px] uppercase tracking-[1.5px] mb-2.5" style={{ color: "#FF9F43" }}>Pending ({pendingActive.length})</div>
-            {pendingActive.map((l) => { const au = ACCOUNTS[l.user] || { name: "?", color: "#888", initial: "?" }; return (
-              <div key={l.id} className="rounded-[14px] mb-2 overflow-hidden" style={{ background: "rgba(255,159,67,0.04)", border: `1px solid ${expanded === `p-${l.id}` ? "rgba(255,159,67,0.3)" : "rgba(255,159,67,0.12)"}` }}>
-                <div className="px-3.5 py-3 flex justify-between items-center cursor-pointer" onClick={() => toggle(`p-${l.id}`)}>
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold" style={{ background: `${au.color}18`, color: au.color }}>{au.initial}</div>
-                    <div><div className="text-[13px] font-semibold">{au.name} — {l.cartons} ctns</div><div className="text-[10px]" style={{ color: "var(--text-muted)" }}>{l.date} · {l.time}</div></div>
-                  </div>
-                  <button onClick={(e) => { e.stopPropagation(); setShowCompleteForm(l.id); setCompleteCustomer(""); setCompletePrice(""); setCompletePayType("paid"); }} className="px-3.5 py-1.5 rounded-lg text-[11px] font-bold border-none cursor-pointer active:scale-95" style={{ background: "linear-gradient(135deg, #FF9F43, #FF8C1A)", color: "#0A0A0B" }}>Complete</button>
-                </div>
-                {expanded === `p-${l.id}` && isAdmin && <div className="px-3.5 pb-3"><button onClick={() => askDelete(`${au.name} — ${l.cartons} cartons`, () => adminDeleteActiveLog(l.id))} className="w-full py-2 rounded-lg text-[10px] font-semibold border-none cursor-pointer" style={{ background: "rgba(255,107,107,0.06)", color: "#FF6B6B" }}>🗑 Delete Log</button></div>}
-              </div>
-            ); })}
-          </>)}
-          <div className="text-[11px] uppercase tracking-[1.5px] mb-2.5 mt-5" style={{ color: "var(--text-sub)" }}>Recent Sales</div>
-          {liveSales.length === 0 && <div className="text-center py-6 text-sm" style={{ color: "var(--text-muted)" }}>No sales yet.</div>}
-          {liveSales.slice(0, 8).map((log) => { const lu = ACCOUNTS[log.user] || { name: "?", color: "#888", initial: "?" }; const ok = canEdit(log.user); return (
-            <div key={log.id} className="rounded-[14px] mb-2 overflow-hidden" style={{ background: log.deleteRequested ? "rgba(255,107,107,0.04)" : "var(--card)", border: `1px solid ${log.deleteRequested ? "rgba(255,107,107,0.15)" : expanded === `s-${log.id}` ? `${user.color}30` : "var(--card-border)"}` }}>
-              <div className="px-3.5 py-3 flex justify-between items-center cursor-pointer" onClick={() => ok && toggle(`s-${log.id}`)}>
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold" style={{ background: `${lu.color}18`, color: lu.color }}>{lu.initial}</div>
-                  <div><div className="text-[13px] font-semibold">{log.customer} — {log.cartons} ctns</div><div className="text-[10px]" style={{ color: "var(--text-muted)" }}>{lu.name} · P{log.pallet} · {log.date}</div></div>
-                </div>
-                <div className="text-right">
-                  <div className="text-sm font-bold font-mono" style={{ color: log.payType === "paid" ? "#4ECDC4" : "#FF9F43" }}>{fmt(log.price)}</div>
-                  <div className="text-[9px] uppercase font-semibold mt-0.5 inline-block px-1.5 py-0.5 rounded" style={{ color: log.payType === "paid" ? "#4ECDC4" : "#FF9F43", background: log.payType === "paid" ? "rgba(78,205,196,0.1)" : "rgba(255,159,67,0.1)" }}>{log.payType === "paid" ? "✓ PAID" : "⏳ CONSIGN"}</div>
-                </div>
-              </div>
-              {expanded === `s-${log.id}` && !log.deleteRequested && ok && (
-                <div className="px-3.5 pb-3 flex gap-2">
-                  <button onClick={() => { setShowEditLog({ type: "sale", id: log.id }); setEditLogCartons(String(log.cartons)); setEditLogCustomer(log.customer); setEditLogPrice(String(log.price)); }} className="flex-1 py-2 rounded-lg text-[10px] font-semibold border-none cursor-pointer" style={{ background: "var(--input-bg)", color: "var(--text-sub)" }}>✏️ Edit</button>
-                  <button onClick={() => askDelete(`${log.customer} — ${fmt(log.price)}`, isAdmin ? () => adminDeleteSale(log.id) : () => requestDeleteSale(log.id, ACCOUNTS[currentUser].name))} className="flex-1 py-2 rounded-lg text-[10px] font-semibold border-none cursor-pointer" style={{ background: "rgba(255,107,107,0.06)", color: "#FF6B6B" }}>🗑 Delete</button>
-                </div>
-              )}
-              {log.deleteRequested && <div className="px-3.5 pb-3 text-[10px] text-center py-1.5 rounded-lg mx-3 mb-2" style={{ background: "rgba(255,107,107,0.06)", color: "#FF6B6B" }}>🗑 Pending admin approval</div>}
-            </div>
-          ); })}
+            {moExps.length === 0
+              ? <div style={{ textAlign:"center", padding:32, color:t.sc }}><div style={{ fontSize:40, marginBottom:8 }}>📝</div>No expenses yet. Tap + to add!</div>
+              : moExps.slice(0, 4).map(e => <TxRow key={e.id} e={e} canDel={false} />)
+            }
+          </div>
         </div>
       )}
 
-      {activeTab === "debts" && (
-        <div className="px-5">
-          <div className="rounded-[20px] px-5 py-6 mb-4" style={{ background: "linear-gradient(145deg, rgba(255,159,67,0.08), rgba(255,159,67,0.02))", border: "1px solid rgba(255,159,67,0.12)" }}>
-            <div className="text-[11px] uppercase tracking-[1.5px] mb-1.5" style={{ color: "#FF9F43" }}>Total Outstanding</div>
-            <div className="text-[40px] font-bold font-mono">{fmt(totalDebtOwed)}</div>
-            <div className="text-[13px] mt-1" style={{ color: "var(--text-muted)" }}>{unsettledDebts.length} unpaid · {settledDebtsArr.length} settled</div>
+      {/* ========== STATS ========== */}
+      {pg === "stats" && (
+        <div style={{ animation:"fadeIn 0.3s", paddingBottom:90 }}>
+          <div style={{ padding:"8px 20px 0" }}><h2 style={{ fontSize:22, fontWeight:700, marginBottom:16 }}>Stats</h2></div>
+          <div style={{ display:"flex", gap:12, padding:"0 20px", marginBottom:16 }}>
+            <div style={{ ...crd, flex:1, textAlign:"center" }}><div style={{ fontSize:11, color:t.sc }}>TOTAL SPENT</div><div style={{ fontSize:22, fontWeight:700, color:t.rd, marginTop:4 }}>{fmtM(totSpent,bCurr)}</div></div>
+            <div style={{ ...crd, flex:1, textAlign:"center" }}><div style={{ fontSize:11, color:t.sc }}>REMAINING</div><div style={{ fontSize:22, fontWeight:700, color:remain>=0?t.gn:t.rd, marginTop:4 }}>{fmtM(remain,bCurr)}</div></div>
           </div>
-          <button onClick={() => setShowDebtForm(true)} className="w-full py-3.5 rounded-[14px] text-sm font-semibold cursor-pointer mb-5" style={{ border: "1px dashed rgba(255,159,67,0.3)", background: "rgba(255,159,67,0.04)", color: "#FF9F43" }}>+ Add Manual Debt</button>
-          {unsettledDebts.map((d) => (
-            <div key={d.id} className="rounded-2xl mb-2.5 overflow-hidden" style={{ background: "rgba(255,159,67,0.03)", border: `1px solid ${expanded === `d-${d.id}` ? "rgba(255,159,67,0.25)" : "rgba(255,159,67,0.1)"}` }}>
-              <div className="p-4 cursor-pointer" onClick={() => toggle(`d-${d.id}`)}>
-                <div className="flex justify-between items-start mb-3">
-                  <div><div className="text-base font-bold">{d.customer}</div><div className="text-[11px] mt-1" style={{ color: "var(--text-muted)" }}>{d.cartons ? `${d.cartons} ctns` : ""}{d.note ? ` · ${d.note}` : ""} · by {d.loggedBy}</div><div className="flex gap-2 mt-1.5"><span className="text-[10px] px-2 py-0.5 rounded font-semibold" style={{ color: "#A78BFA", background: "rgba(167,139,250,0.1)" }}>P#{d.pallet}</span><span className="text-[10px]" style={{ color: "var(--text-muted)" }}>{d.date}</span></div></div>
-                  <div className="text-[22px] font-bold font-mono" style={{ color: "#FF9F43" }}>{fmt(d.amount)}</div>
-                </div>
-                <button onClick={(e) => { e.stopPropagation(); settleDebtFn(d.id, d.settled); }} className="w-full py-3 rounded-[10px] text-[13px] font-bold border-none cursor-pointer active:scale-[0.98]" style={{ background: "linear-gradient(135deg, #4ECDC4, #44B8B0)", color: "#0A0A0B" }}>✓ Mark as Paid</button>
-              </div>
-              {expanded === `d-${d.id}` && isAdmin && <div className="px-4 pb-3"><button onClick={() => askDelete(`${d.customer} — ${fmt(d.amount)}`, () => adminDeleteDebt(d.id))} className="w-full py-2.5 rounded-lg text-[11px] font-semibold border-none cursor-pointer" style={{ background: "rgba(255,107,107,0.06)", color: "#FF6B6B" }}>🗑 Delete Debt</button></div>}
+
+          {/* Category bars */}
+          <div style={{ padding:"0 20px", marginBottom:16 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+              <span style={{ fontSize:16, fontWeight:600 }}>Spending by Category</span>
+              <span style={{ fontSize:13, color:t.ac, cursor:"pointer" }} onClick={() => setShowCht(true)}>Charts →</span>
             </div>
-          ))}
-          {settledDebtsArr.length > 0 && (<>
-            <div className="text-[11px] uppercase tracking-[1.5px] mb-2.5 mt-6" style={{ color: "#4ECDC4" }}>Settled ({settledDebtsArr.length})</div>
-            {settledDebtsArr.map((d) => (
-              <div key={d.id} className="rounded-2xl mb-2 overflow-hidden opacity-60" style={{ background: "rgba(78,205,196,0.03)", border: `1px solid ${expanded === `sd-${d.id}` ? "rgba(78,205,196,0.2)" : "rgba(78,205,196,0.08)"}` }}>
-                <div className="px-4 py-3.5 flex justify-between items-center cursor-pointer" onClick={() => isAdmin && toggle(`sd-${d.id}`)}>
-                  <div><div className="text-sm font-semibold line-through" style={{ color: "var(--text-sub)" }}>{d.customer}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>P#{d.pallet} · Paid {d.settledDate}</div></div>
-                  <div className="flex items-center gap-2"><span className="font-mono font-bold line-through" style={{ color: "#4ECDC4" }}>{fmt(d.amount)}</span><button onClick={(e) => { e.stopPropagation(); settleDebtFn(d.id, d.settled); }} className="px-2 py-1 rounded text-[10px] cursor-pointer border-none" style={{ background: "var(--card)", color: "var(--text-sub)" }}>Undo</button></div>
+            {Object.entries(catTotals).sort((a,b) => b[1]-a[1]).slice(0,5).map(([ct, am]) => {
+              const co = cats.find(c => c.name === ct);
+              const p = totSpent > 0 ? (am/totSpent)*100 : 0;
+              return (
+                <div key={ct} style={{ marginBottom:10 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
+                    <span style={{ fontSize:13 }}>{co?.emoji} {ct}</span>
+                    <span style={{ fontSize:13, fontWeight:600 }}>{fmtM(am,bCurr)}</span>
+                  </div>
+                  <div style={{ width:"100%", height:8, borderRadius:4, background:t.al }}>
+                    <div style={{ height:"100%", borderRadius:4, background:co?.color||t.ac, width:p+"%", transition:"width 0.5s" }} />
+                  </div>
                 </div>
-                {expanded === `sd-${d.id}` && isAdmin && <div className="px-4 pb-3"><button onClick={() => askDelete(`${d.customer} — ${fmt(d.amount)}`, () => adminDeleteDebt(d.id))} className="w-full py-2 rounded-lg text-[10px] font-semibold border-none cursor-pointer" style={{ background: "rgba(255,107,107,0.06)", color: "#FF6B6B" }}>🗑 Delete</button></div>}
+              );
+            })}
+            {Object.keys(catTotals).length === 0 && <div style={{ textAlign:"center", padding:24, color:t.sc }}>No data yet</div>}
+          </div>
+
+          {/* Explore */}
+          <div style={{ padding:"0 20px" }}>
+            <div style={{ fontSize:16, fontWeight:600, marginBottom:10 }}>Explore</div>
+            {[
+              { l:"All Transactions", d:"Complete history", e:"📋", a:() => setShowTxn(true) },
+              { l:"Charts & Graphs", d:"Visual breakdown", e:"📊", a:() => setShowCht(true) },
+              { l:"AI Insights", d:"Smart predictions", e:"🤖", a:() => setShowIns(true) },
+              { l:"Monthly Report", d:"Grade & breakdown", e:"📑", a:() => setShowRep(true) },
+            ].map(x => (
+              <div key={x.l} onClick={x.a} style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 16px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:8, cursor:"pointer" }}>
+                <div style={{ width:42, height:42, borderRadius:12, background:t.ac+"22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>{x.e}</div>
+                <div style={{ flex:1 }}><div style={{ fontWeight:600, fontSize:14 }}>{x.l}</div><div style={{ fontSize:12, color:t.sc }}>{x.d}</div></div>
+                <span style={{ color:t.sc, fontSize:18 }}>›</span>
               </div>
             ))}
-          </>)}
+          </div>
         </div>
       )}
 
-      {activeTab === "approvals" && isAdmin && (
-        <div className="px-5">
-          <div className="rounded-[20px] px-5 py-6 mb-4" style={{ background: "linear-gradient(145deg, rgba(255,107,107,0.08), rgba(255,107,107,0.02))", border: "1px solid rgba(255,107,107,0.12)" }}>
-            <div className="text-[11px] uppercase tracking-[1.5px] mb-1.5" style={{ color: "#FF6B6B" }}>Delete Requests</div>
-            <div className="text-[36px] font-bold font-mono">{deleteRequests.length}</div>
-          </div>
-          {deleteRequests.length === 0 && <div className="text-center py-8 text-sm" style={{ color: "var(--text-muted)" }}>No pending requests.</div>}
-          {deleteRequests.map((r) => { const isAL = !r.customer; return (
-            <div key={r.id} className="rounded-[16px] p-4 mb-3" style={{ background: "rgba(255,107,107,0.03)", border: "1px solid rgba(255,107,107,0.12)" }}>
-              <div className="text-[13px] font-semibold mb-1">{r.deleteRequestedBy} wants to delete</div>
-              <div className="text-sm font-mono font-bold">{r.cartons} cartons {r.customer && `· ${r.customer} · ${fmt(r.price)}`}</div>
-              <div className="text-[10px] mt-1 mb-3" style={{ color: "var(--text-muted)" }}>{r.date} · {r.time}</div>
-              <div className="flex gap-2">
-                <button onClick={() => askDelete(`${r.cartons} cartons${r.customer ? ` — ${r.customer}` : ""}`, isAL ? () => approveDeleteActiveLog(r.id) : () => approveDeleteSale(r.id))} className="flex-1 py-3 rounded-xl text-[13px] font-bold border-none cursor-pointer" style={{ background: "linear-gradient(135deg, #FF6B6B, #FF4757)", color: "#fff" }}>Approve</button>
-                <button onClick={() => isAL ? denyDeleteActiveLog(r.id) : denyDeleteSale(r.id)} className="flex-1 py-3 rounded-xl text-[13px] font-bold border-none cursor-pointer" style={{ background: "var(--card)", border: "1px solid var(--card-border)", color: "var(--text-sub)" }}>Deny</button>
-              </div>
-            </div>
-          ); })}
-          <button onClick={() => setActiveTab("dashboard")} className="w-full mt-4 py-3 rounded-xl text-[13px] cursor-pointer" style={{ border: "1px solid var(--input-border)", background: "transparent", color: "var(--text-muted)" }}>← Back</button>
-        </div>
-      )}
+      {/* ========== SETTINGS ========== */}
+      {pg === "settings" && (
+        <div style={{ animation:"fadeIn 0.3s", paddingBottom:90 }}>
+          <div style={{ padding:"8px 20px" }}>
+            <h2 style={{ fontSize:22, fontWeight:700, marginBottom:20 }}>Settings</h2>
+            <div style={{ fontSize:14, fontWeight:600, color:t.sc, marginBottom:10, textTransform:"uppercase", letterSpacing:1 }}>Profile</div>
+            <div style={{ marginBottom:14 }}><label style={{ fontSize:13, color:t.sc, marginBottom:6, display:"block" }}>Name</label><input style={inp} value={uName} onChange={e => setUName(e.target.value)} /></div>
 
-      {activeTab === "insights" && (() => {
-        const now = new Date(), today = now.toISOString().split("T")[0], weekAgo = new Date(now - 7 * 86400000).toISOString().split("T")[0], monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0], yearStart = `${now.getFullYear()}-01-01`;
-        const c = (a) => ({ cartons: a.reduce((s, l) => s + (l.cartons||0), 0), revenue: a.filter(l => l.payType==="paid").reduce((s,l) => s+(l.price||0),0), consignment: a.filter(l => l.payType==="consignment").reduce((s,l) => s+(l.price||0),0), sales: a.length, paid: a.filter(l => l.payType==="paid").length, con: a.filter(l => l.payType==="consignment").length });
-        const t=c(liveSales.filter(s=>s.date===today)), w=c(liveSales.filter(s=>s.date>=weekAgo)), m=c(liveSales.filter(s=>s.date>=monthStart)), y=c(liveSales.filter(s=>s.date>=yearStart)), all=c(liveSales);
-        const days=[...new Set(liveSales.map(s=>s.date))].length||1, avgC=Math.round(all.cartons/days), avgR=Math.round(all.revenue/days), cRate=all.sales>0?Math.round((all.con/all.sales)*100):0, proj=avgC>0?Math.round(stockLeft/avgC):0;
-        const ins=[];
-        if(w.cartons>avgC*7*1.2)ins.push({e:"🔥",t:`This week: ${w.cartons} cartons — 20%+ above average!`}); else if(w.cartons<avgC*7*0.7&&w.cartons>0)ins.push({e:"📉",t:`Slow week: ${w.cartons} cartons vs ~${avgC*7} avg.`}); else if(w.cartons>0)ins.push({e:"📊",t:`Steady week — ${w.cartons} cartons.`});
-        if(w.revenue>avgR*7*1.2)ins.push({e:"💰",t:`Strong cash: ${fmt(w.revenue)} this week vs ${fmt(avgR*7)} avg.`}); else if(w.revenue>0)ins.push({e:"💵",t:`${fmt(w.revenue)} cash this week. Avg: ${fmt(avgR*7)}/wk.`});
-        if(m.revenue>0)ins.push({e:"📅",t:`This month: ${fmt(m.revenue)} cash + ${fmt(m.consignment)} consignment from ${m.sales} sales.`});
-        if(cRate>40)ins.push({e:"⚠️",t:`${cRate}% consignment. Push for cash sales.`}); else if(cRate<15&&all.sales>3)ins.push({e:"✅",t:`Only ${cRate}% consignment. Great!`});
-        if(totalDebtOwed>paidRevenue*0.3&&totalDebtOwed>0)ins.push({e:"🔔",t:`Debts (${fmt(totalDebtOwed)}) = ${Math.round((totalDebtOwed/(paidRevenue||1))*100)}% of revenue.`});
-        if(totalDebtSettled>0)ins.push({e:"🎉",t:`${fmt(totalDebtSettled)} debts settled!`});
-        if(proj>0&&proj<14)ins.push({e:"📦",t:`Stock runs out in ~${proj} days. Reorder!`}); else if(proj>=14)ins.push({e:"📦",t:`~${proj} days of stock left.`});
-        if(t.cartons===0&&now.getHours()>12)ins.push({e:"⏰",t:"No sales today yet!"}); else if(t.cartons>avgC*1.5)ins.push({e:"🎯",t:`${t.cartons} cartons today + ${fmt(t.revenue)} cash!`});
-        if(!ins.length)ins.push({e:"👋",t:"Log sales to get insights."});
-        return (
-          <div className="px-5">
-            <div className="rounded-[20px] p-5 mb-4" style={{ background: "linear-gradient(145deg, rgba(167,139,250,0.08), rgba(167,139,250,0.02))", border: "1px solid rgba(167,139,250,0.12)" }}>
-              <div className="flex items-center gap-2 mb-3"><span className="text-lg">🧠</span><div className="text-[11px] uppercase tracking-[1.5px] font-semibold" style={{ color: "#A78BFA" }}>AI Insights</div></div>
-              {ins.map((i,x)=>(<div key={x} className="flex gap-3 mb-3 last:mb-0"><span className="text-base mt-0.5">{i.e}</span><p className="text-[13px] leading-relaxed">{i.t}</p></div>))}
-            </div>
-            {[{l:"Today",d:t,a:"#4ECDC4"},{l:"This Week",d:w,a:"#A78BFA"},{l:"This Month",d:m,a:"#FF9F43"},{l:"This Year",d:y,a:"#FF6B6B"}].map(p=>(
-              <div key={p.l} className="rounded-[16px] p-4 mb-3" style={{ background: "var(--card)", border: "1px solid var(--card-border)" }}>
-                <div className="text-[11px] uppercase tracking-[1.5px] mb-3 font-semibold" style={{ color: p.a }}>{p.l}</div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div><div className="text-[10px] uppercase" style={{ color: "var(--text-muted)" }}>Cartons</div><div className="text-lg font-bold font-mono mt-0.5">{p.d.cartons}</div></div>
-                  <div><div className="text-[10px] uppercase" style={{ color: "var(--text-muted)" }}>Cash In</div><div className="text-lg font-bold font-mono mt-0.5" style={{ color: "#4ECDC4" }}>{fmt(p.d.revenue)}</div></div>
-                  <div><div className="text-[10px] uppercase" style={{ color: "var(--text-muted)" }}>Consignment</div><div className="text-lg font-bold font-mono mt-0.5" style={{ color: "#FF9F43" }}>{fmt(p.d.consignment)}</div></div>
-                  <div><div className="text-[10px] uppercase" style={{ color: "var(--text-muted)" }}>Sales</div><div className="text-lg font-bold font-mono mt-0.5">{p.d.paid}p · {p.d.con}c</div></div>
-                </div>
-              </div>
-            ))}
-            <div className="rounded-[16px] p-4 mb-3" style={{ background: "linear-gradient(145deg, rgba(78,205,196,0.06), rgba(78,205,196,0.02))", border: "1px solid rgba(78,205,196,0.1)" }}>
-              <div className="text-[11px] uppercase tracking-[1.5px] mb-3 font-semibold" style={{ color: "#4ECDC4" }}>Daily Averages</div>
-              <div className="grid grid-cols-3 gap-3">
-                <div><div className="text-[10px] uppercase" style={{ color: "var(--text-muted)" }}>Cartons</div><div className="text-xl font-bold font-mono mt-0.5">{avgC}</div></div>
-                <div><div className="text-[10px] uppercase" style={{ color: "var(--text-muted)" }}>Revenue</div><div className="text-xl font-bold font-mono mt-0.5" style={{ color: "#4ECDC4" }}>{fmt(avgR)}</div></div>
-                <div><div className="text-[10px] uppercase" style={{ color: "var(--text-muted)" }}>Cash %</div><div className="text-xl font-bold font-mono mt-0.5">{100-cRate}%</div></div>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+            <div style={{ fontSize:14, fontWeight:600, color:t.sc, marginBottom:10, marginTop:20, textTransform:"uppercase", letterSpacing:1 }}>Budget</div>
+            <div style={{ marginBottom:14 }}><label style={{ fontSize:13, color:t.sc, marginBottom:6, display:"block" }}>Monthly Budget</label><input style={inp} type="number" value={budget} onChange={e => setBudget(parseFloat(e.target.value)||0)} /></div>
+            <div style={{ marginBottom:14 }}><label style={{ fontSize:13, color:t.sc, marginBottom:6, display:"block" }}>Base Currency</label><select style={{ ...inp, appearance:"auto" }} value={bCurr} onChange={e => setBCurr(e.target.value)}>{CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.symbol} {c.code} — {c.name}</option>)}</select></div>
 
-      {activeTab === "history" && (
-        <div className="px-5">
-          <div className="rounded-[20px] px-5 py-6 mb-4" style={{ background: "linear-gradient(145deg, rgba(78,205,196,0.08), rgba(78,205,196,0.02))", border: "1px solid rgba(78,205,196,0.12)" }}>
-            <div className="text-[11px] uppercase tracking-[1.5px] mb-1.5" style={{ color: "#4ECDC4" }}>Current Stock</div>
-            <div className="text-[36px] font-bold font-mono">{TS > 0 ? TS.toLocaleString() : "—"}</div>
-            <div className="text-[13px] mt-1" style={{ color: "var(--text-muted)" }}>{TS > 0 ? `${SD} · ${CPN}/pallet · ${TP} pallets` : "Not configured yet"}</div>
-          </div>
-          <div className="text-[11px] uppercase tracking-[1.5px] mb-3" style={{ color: "var(--text-sub)" }}>Receive History</div>
-          {stockHistory.length === 0 && <div className="text-center py-8 text-sm" style={{ color: "var(--text-muted)" }}>No history yet.</div>}
-          {stockHistory.map((h, i) => {
-            const isCurrent = h.totalStock === config.totalStock && h.stockDate === config.stockDate && config.totalStock > 0;
-            return (
-            <div key={h.id} className="rounded-[14px] mb-2 overflow-hidden" style={{ background: isCurrent ? "rgba(78,205,196,0.04)" : "var(--card)", border: `1px solid ${isCurrent ? "rgba(78,205,196,0.2)" : expanded === `h-${h.id}` ? "rgba(78,205,196,0.3)" : "var(--card-border)"}` }}>
-              <div className="px-4 py-4 cursor-pointer" onClick={() => isAdmin && toggle(`h-${h.id}`)}>
-                <div className="flex justify-between items-start">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold font-mono" style={{ background: "rgba(78,205,196,0.1)", color: "#4ECDC4" }}>#{i + 1}</div>
-                    <div><div className="text-[15px] font-bold"><span className="font-mono">{h.totalStock?.toLocaleString()}</span> cartons</div><div className="text-[11px] mt-1" style={{ color: "var(--text-muted)" }}>{h.stockDate}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>{h.cartonsPerPallet}/pallet · by {h.updatedBy}</div></div>
+            <div style={{ fontSize:14, fontWeight:600, color:t.sc, marginBottom:10, marginTop:20, textTransform:"uppercase", letterSpacing:1 }}>Alerts & Notifications</div>
+            <div style={{ ...crd, marginBottom:10 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+                <div><div style={{ fontWeight:600, fontSize:14 }}>Push Notifications</div><div style={{ fontSize:12, color:t.sc }}>Get alerts on your phone</div></div>
+                <div style={tog(notifOn)} onClick={() => notifOn ? setNotifOn(false) : reqNotif()}><div style={togD(notifOn)} /></div>
+              </div>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <div><div style={{ fontWeight:600, fontSize:14 }}>Daily Reminder</div><div style={{ fontSize:12, color:t.sc }}>Remind to log expenses</div></div>
+                <div style={tog(dailyRem)} onClick={() => setDailyRem(!dailyRem)}><div style={togD(dailyRem)} /></div>
+              </div>
+            </div>
+
+            <div style={{ marginBottom:14 }}>
+              <label style={{ fontSize:13, color:t.sc, marginBottom:6, display:"block" }}>⚠️ Warning at (%)</label>
+              <div style={{ display:"flex", alignItems:"center", gap:12 }}><input style={{ ...inp, flex:1 }} type="range" min="30" max="95" value={warnAt} onChange={e => setWarnAt(parseInt(e.target.value))} /><span style={{ fontWeight:700, fontSize:16, color:t.wn, minWidth:40 }}>{warnAt}%</span></div>
+            </div>
+            <div style={{ marginBottom:14 }}>
+              <label style={{ fontSize:13, color:t.sc, marginBottom:6, display:"block" }}>🚨 Alert at (%)</label>
+              <div style={{ display:"flex", alignItems:"center", gap:12 }}><input style={{ ...inp, flex:1 }} type="range" min="50" max="100" value={alertAt} onChange={e => setAlertAt(parseInt(e.target.value))} /><span style={{ fontWeight:700, fontSize:16, color:t.rd, minWidth:40 }}>{alertAt}%</span></div>
+            </div>
+
+            {alerts.length > 0 && (
+              <div style={{ marginBottom:14 }}>
+                <div style={{ fontSize:13, color:t.sc, marginBottom:8 }}>Recent Alerts</div>
+                {alerts.slice(0,5).map((a,i) => (
+                  <div key={i} style={{ padding:"10px 12px", borderRadius:10, background:a.type==="alert"?(t.rd+"10"):(t.wn+"10"), border:"1px solid "+(a.type==="alert"?(t.rd+"30"):(t.wn+"30")), marginBottom:6, fontSize:13 }}>
+                    {a.m}
+                    <div style={{ fontSize:11, color:t.sc, marginTop:4 }}>{new Date(a.d).toLocaleString()}</div>
                   </div>
-                  <div className="text-right">
-                    {isCurrent && <div className="text-[9px] uppercase font-bold px-2 py-0.5 rounded mb-1 inline-block" style={{ background: "rgba(78,205,196,0.15)", color: "#4ECDC4" }}>CURRENT</div>}
-                    <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>{h.date}<br/>{h.time}</div>
-                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ fontSize:14, fontWeight:600, color:t.sc, marginBottom:10, marginTop:20, textTransform:"uppercase", letterSpacing:1 }}>Mode Features</div>
+            {activeMode === "personal" && (
+              <div style={{ padding:"16px", borderRadius:14, background:t.al, border:"1px solid "+t.bd, marginBottom:20, textAlign:"center" }}>
+                <div style={{ fontSize:13, color:t.sc }}>Switch to Pro or Business mode using the toggle at the top of the screen to access premium features.</div>
+              </div>
+            )}
+            {activeMode === "pro" && isPro && (
+              <div style={{ marginBottom:20 }}>
+                <div style={{ padding:"12px 16px", borderRadius:14, background:"linear-gradient(135deg,#6C63FF10,#8b7aff10)", border:"1px solid #6C63FF30", marginBottom:10, display:"flex", alignItems:"center", gap:10 }}>
+                  <span style={{ fontSize:18 }}>💎</span>
+                  <span style={{ fontSize:14, fontWeight:600, color:t.ac }}>Pro Active</span>
+                </div>
+                <div onClick={() => setShowRecurring(true)} style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 16px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:8, cursor:"pointer" }}>
+                  <span style={{ fontSize:20 }}>🔁</span>
+                  <div style={{ flex:1 }}><div style={{ fontWeight:600, fontSize:14 }}>Recurring Expenses</div><div style={{ fontSize:12, color:t.sc }}>{recurring.length} items · {fmtM(recurTotal, bCurr)}/mo</div></div>
+                  <span style={{ color:t.sc }}>›</span>
+                </div>
+                <div onClick={() => setShowCatBdgt(true)} style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 16px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:8, cursor:"pointer" }}>
+                  <span style={{ fontSize:20 }}>🎯</span>
+                  <div style={{ flex:1 }}><div style={{ fontWeight:600, fontSize:14 }}>Category Budgets</div><div style={{ fontSize:12, color:t.sc }}>Set spending limits per category</div></div>
+                  <span style={{ color:t.sc }}>›</span>
                 </div>
               </div>
-              {expanded === `h-${h.id}` && isAdmin && (
-                <div className="px-4 pb-3 flex gap-2">
-                  <button onClick={() => { setShowEditHistory(h); setEditHistoryStock(String(h.totalStock)); setEditHistoryDate(h.stockDate); setEditHistoryCPN(String(h.cartonsPerPallet)); }} className="flex-1 py-2.5 rounded-lg text-[10px] font-semibold border-none cursor-pointer" style={{ background: "var(--input-bg)", color: "var(--text-sub)" }}>✏️ Edit</button>
-                  <button onClick={() => { const isCurrent = h.totalStock === config.totalStock && h.stockDate === config.stockDate; askDelete(`${h.totalStock?.toLocaleString()} cartons — ${h.stockDate}${isCurrent ? " (CURRENT — homepage will reset)" : ""}`, () => deleteStockHistory(h.id, isCurrent)); }} className="flex-1 py-2.5 rounded-lg text-[10px] font-semibold border-none cursor-pointer" style={{ background: "rgba(255,107,107,0.06)", color: "#FF6B6B" }}>🗑 Delete</button>
+            )}
+            {activeMode === "business" && isBiz && (
+              <div style={{ marginBottom:20 }}>
+                <div style={{ padding:"12px 16px", borderRadius:14, background:"linear-gradient(135deg,#f5af1910,#f093fb10)", border:"1px solid #f5af1930", marginBottom:10, display:"flex", alignItems:"center", gap:10 }}>
+                  <span style={{ fontSize:18 }}>💼</span>
+                  <span style={{ fontSize:14, fontWeight:600, color:"#f5af19" }}>Business Active</span>
                 </div>
-              )}
-            </div>
-          ); })}
-        </div>
-      )}
+                <div onClick={() => setShowInvoice(true)} style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 16px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:8, cursor:"pointer" }}>
+                  <span style={{ fontSize:20 }}>🧾</span>
+                  <div style={{ flex:1 }}><div style={{ fontWeight:600, fontSize:14 }}>Invoices</div><div style={{ fontSize:12, color:t.sc }}>{unpaidInv.length} unpaid · {paidInv.length} paid</div></div>
+                  <span style={{ color:t.sc }}>›</span>
+                </div>
+                <div onClick={() => setShowRevenue(true)} style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 16px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:8, cursor:"pointer" }}>
+                  <span style={{ fontSize:20 }}>💵</span>
+                  <div style={{ flex:1 }}><div style={{ fontWeight:600, fontSize:14 }}>Revenue</div><div style={{ fontSize:12, color:t.sc }}>{fmtM(totalRev, bCurr)} this month</div></div>
+                  <span style={{ color:t.sc }}>›</span>
+                </div>
+                <div onClick={() => setShowPL(true)} style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 16px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:8, cursor:"pointer" }}>
+                  <span style={{ fontSize:20 }}>📈</span>
+                  <div style={{ flex:1 }}><div style={{ fontWeight:600, fontSize:14 }}>P&L Dashboard</div><div style={{ fontSize:12, color:profit>=0?t.gn:t.rd }}>{profit>=0?"Profit":"Loss"}: {fmtM(Math.abs(profit), bCurr)}</div></div>
+                  <span style={{ color:t.sc }}>›</span>
+                </div>
+                <div onClick={() => setShowRecurring(true)} style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 16px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:8, cursor:"pointer" }}>
+                  <span style={{ fontSize:20 }}>🔁</span>
+                  <div style={{ flex:1 }}><div style={{ fontWeight:600, fontSize:14 }}>Recurring Expenses</div><div style={{ fontSize:12, color:t.sc }}>{recurring.length} items</div></div>
+                  <span style={{ color:t.sc }}>›</span>
+                </div>
+                <div onClick={() => setShowCatBdgt(true)} style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 16px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:8, cursor:"pointer" }}>
+                  <span style={{ fontSize:20 }}>🎯</span>
+                  <div style={{ flex:1 }}><div style={{ fontWeight:600, fontSize:14 }}>Category Budgets</div><div style={{ fontSize:12, color:t.sc }}>Set spending limits</div></div>
+                  <span style={{ color:t.sc }}>›</span>
+                </div>
+              </div>
+            )}
 
-      {activeTab === "settings" && (
-        <div className="px-5">
-          {isAdmin ? (
-            <div className="rounded-[20px] p-5 mb-4" style={{ background: "var(--card)", border: "1px solid var(--card-border)" }}>
-              <div className="text-base font-bold mb-4">Stock Configuration</div>
-              <Input label="Total Stock Received" value={editStock} onChange={setEditStock} placeholder="e.g. 1500" type="number" mono />
-              <Input label="Date Received" value={editDate} onChange={setEditDate} placeholder="e.g. 23 Jan 2026" />
-              <Input label="Cartons Per Pallet" value={editCPN} onChange={setEditCPN} placeholder="e.g. 84" type="number" mono />
-              <button onClick={handleSaveSettings} className="w-full py-3.5 rounded-[14px] text-sm font-bold border-none cursor-pointer active:scale-[0.98]" style={{ background: settingsSaved ? "linear-gradient(135deg, #44B8B0, #3AA89F)" : "linear-gradient(135deg, #4ECDC4, #44B8B0)", color: "#0A0A0B" }}>{settingsSaved ? "✓ Saved!" : "Save Changes"}</button>
+            <div style={{ fontSize:14, fontWeight:600, color:t.sc, marginBottom:10, marginTop:20, textTransform:"uppercase", letterSpacing:1 }}>Appearance</div>
+            <div style={{ display:"flex", gap:10, marginBottom:20 }}>
+              <button onClick={() => setDk(true)} style={{ ...btn(dk?t.ac:t.al), flex:1, color:dk?"#fff":t.tx, border:"1px solid "+(dk?t.ac:t.bd) }}>🌙 Dark</button>
+              <button onClick={() => setDk(false)} style={{ ...btn(!dk?t.ac:t.al), flex:1, color:!dk?"#fff":t.tx, border:"1px solid "+(!dk?t.ac:t.bd) }}>☀️ Light</button>
             </div>
-          ) : (
-            <div className="rounded-[20px] p-6 mb-4 text-center" style={{ background: "var(--card)", border: "1px solid var(--card-border)" }}><div className="text-2xl mb-3">🔒</div><div className="text-base font-bold mb-2">Admin Only</div><div className="text-sm" style={{ color: "var(--text-muted)" }}>Only admin can edit stock settings.</div></div>
-          )}
-          <div className="rounded-[14px] px-4 py-4 mb-4 flex justify-between items-center" style={{ background: "var(--card)", border: "1px solid var(--card-border)" }}>
-            <div className="text-sm font-semibold">Dark Mode</div>
-            <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="w-12 h-7 rounded-full relative cursor-pointer border-none" style={{ background: theme === "dark" ? "#4ECDC4" : "var(--input-border)" }}><div className="absolute top-0.5 w-6 h-6 rounded-full bg-white shadow transition-all" style={{ left: theme === "dark" ? 22 : 2 }} /></button>
+
+            <div style={{ padding:"14px 16px", borderRadius:14, background:t.ac+"12", border:"1px solid "+t.ac+"30", marginBottom:20 }}>
+              <div style={{ fontSize:13, fontWeight:600, color:t.ac, marginBottom:4 }}>📱 Data stored on this device</div>
+              <div style={{ fontSize:12, color:t.sc, lineHeight:1.5 }}>Your data is saved locally on this device. Clearing browser data will erase it. Cloud sync coming soon!</div>
+            </div>
+
+            <div style={{ fontSize:14, fontWeight:600, color:t.rd, marginBottom:10, textTransform:"uppercase", letterSpacing:1 }}>Danger Zone</div>
+            <button style={{ ...btn(t.rd), marginBottom:10 }} onClick={() => setConfirmAction("reset")}>🗑️ Reset All Data</button>
+            <button style={{ ...btn(t.al), color:t.tx, border:"1px solid "+t.bd }} onClick={() => setConfirmAction("fresh")}>🔄 Start Fresh</button>
           </div>
-          <button onClick={handleLogout} className="w-full py-3.5 rounded-xl text-[13px] cursor-pointer" style={{ border: "1px solid var(--input-border)", background: "transparent", color: "var(--text-muted)" }}>Sign Out</button>
         </div>
       )}
 
-      {showForm && <Modal onClose={() => setShowForm(false)}><h2 className="text-lg font-bold mb-5" style={{ color: "var(--text)" }}>Log a Sale</h2><Input label="Customer Name" value={formCustomer} onChange={setFormCustomer} placeholder="e.g. Amy" /><Input label="Cartons" value={formCartons} onChange={setFormCartons} placeholder="e.g. 25" type="number" mono /><Input label="Price (₦)" value={formPrice} onChange={setFormPrice} placeholder="e.g. 50000" type="number" mono /><PayToggle value={formPayType} onChange={setFormPayType} />{formPayType === "consignment" && <div className="rounded-[10px] px-3.5 py-2.5 text-xs mb-3.5 -mt-2" style={{ background: "rgba(255,159,67,0.06)", border: "1px solid rgba(255,159,67,0.15)", color: "#FF9F43" }}>⚠️ <strong>{formCustomer || "Customer"}</strong> → debt list</div>}<button onClick={handleAddSale} className="w-full py-4 rounded-[14px] text-[15px] font-bold border-none cursor-pointer active:scale-[0.98]" style={{ background: formPayType === "paid" ? "linear-gradient(135deg, #4ECDC4, #44B8B0)" : "linear-gradient(135deg, #FF9F43, #FF8C1A)", color: "#0A0A0B" }}>{formPayType === "paid" ? "Log Paid Sale →" : "Log Consignment →"}</button></Modal>}
+      {/* FAB */}
+      <button onClick={() => { setECurr(bCurr); setShowAdd(true); }} style={{ position:"fixed", bottom:80, right:"calc(50% - 208px)", width:56, height:56, borderRadius:"50%", background:"linear-gradient(135deg,"+t.ac+",#8b7aff)", color:"#fff", border:"none", fontSize:28, cursor:"pointer", boxShadow:"0 4px 20px "+t.gl, display:"flex", alignItems:"center", justifyContent:"center", zIndex:50 }}>+</button>
 
-      {showCompleteForm !== null && (() => { const log = activeLogs.find((l) => l.id === showCompleteForm); if (!log) return null; const au = ACCOUNTS[log.user] || { name: "?", color: "#888" }; return (<Modal onClose={() => setShowCompleteForm(null)}><h2 className="text-lg font-bold mb-1.5" style={{ color: "var(--text)" }}>Complete Sale</h2><p className="text-[13px] mb-5" style={{ color: "var(--text-muted)" }}><span style={{ color: au.color, fontWeight: 600 }}>{au.name}</span> logged <span className="font-mono font-bold" style={{ color: "var(--text)" }}>{log.cartons} cartons</span></p><Input label="Customer" value={completeCustomer} onChange={setCompleteCustomer} placeholder="e.g. Amy" /><Input label="Price (₦)" value={completePrice} onChange={setCompletePrice} placeholder="e.g. 50000" type="number" mono /><PayToggle value={completePayType} onChange={setCompletePayType} /><button onClick={handleCompleteLog} className="w-full py-4 rounded-[14px] text-[15px] font-bold border-none cursor-pointer active:scale-[0.98]" style={{ background: completePayType === "paid" ? "linear-gradient(135deg, #4ECDC4, #44B8B0)" : "linear-gradient(135deg, #FF9F43, #FF8C1A)", color: "#0A0A0B" }}>Complete Sale →</button></Modal>); })()}
-
-      {showDebtForm && <Modal onClose={() => setShowDebtForm(false)}><h2 className="text-lg font-bold mb-5" style={{ color: "var(--text)" }}>Add Manual Debt</h2><Input label="Who Owes" value={debtName} onChange={setDebtName} placeholder="Customer name" /><Input label="Amount (₦)" value={debtAmount} onChange={setDebtAmount} placeholder="e.g. 50000" type="number" mono /><Input label="Note" value={debtNote} onChange={setDebtNote} placeholder="e.g. 25 cartons - partial" /><button onClick={handleAddManualDebt} className="w-full py-4 rounded-[14px] text-[15px] font-bold border-none cursor-pointer active:scale-[0.98]" style={{ background: "linear-gradient(135deg, #FF9F43, #FF8C1A)", color: "#0A0A0B" }}>Add Debt →</button></Modal>}
-
-      {showEditLog && <Modal onClose={() => setShowEditLog(null)}><h2 className="text-lg font-bold mb-5" style={{ color: "var(--text)" }}>Edit {showEditLog.type === "active" ? "Log" : "Sale"}</h2><Input label="Cartons" value={editLogCartons} onChange={setEditLogCartons} placeholder="e.g. 25" type="number" mono />{showEditLog.type === "sale" && (<><Input label="Customer" value={editLogCustomer} onChange={setEditLogCustomer} placeholder="e.g. Amy" /><Input label="Price (₦)" value={editLogPrice} onChange={setEditLogPrice} placeholder="e.g. 50000" type="number" mono /></>)}<button onClick={handleEditLog} className="w-full py-4 rounded-[14px] text-[15px] font-bold border-none cursor-pointer active:scale-[0.98]" style={{ background: "linear-gradient(135deg, #4ECDC4, #44B8B0)", color: "#0A0A0B" }}>Save →</button></Modal>}
-
-      {showEditHistory && <Modal onClose={() => setShowEditHistory(null)}><h2 className="text-lg font-bold mb-5" style={{ color: "var(--text)" }}>Edit History</h2><Input label="Total Stock" value={editHistoryStock} onChange={setEditHistoryStock} placeholder="e.g. 1500" type="number" mono /><Input label="Date Received" value={editHistoryDate} onChange={setEditHistoryDate} placeholder="e.g. 23 Jan 2026" /><Input label="Cartons Per Pallet" value={editHistoryCPN} onChange={setEditHistoryCPN} placeholder="e.g. 84" type="number" mono /><button onClick={handleEditHistoryEntry} className="w-full py-4 rounded-[14px] text-[15px] font-bold border-none cursor-pointer active:scale-[0.98]" style={{ background: "linear-gradient(135deg, #4ECDC4, #44B8B0)", color: "#0A0A0B" }}>Save →</button></Modal>}
-
-      {confirmDelete && <Modal onClose={() => setConfirmDelete(null)}><div className="text-center mb-5"><div className="text-3xl mb-3">🗑</div><h2 className="text-lg font-bold mb-2" style={{ color: "var(--text)" }}>Confirm Delete</h2><p className="text-sm" style={{ color: "var(--text-muted)" }}>This cannot be undone.</p><p className="text-sm font-semibold mt-2" style={{ color: "#FF6B6B" }}>{confirmDelete.label}</p></div><div className="flex gap-3"><button onClick={() => setConfirmDelete(null)} className="flex-1 py-3.5 rounded-[14px] text-sm font-bold border-none cursor-pointer" style={{ background: "var(--card)", border: "1px solid var(--card-border)", color: "var(--text-sub)" }}>Cancel</button><button onClick={doDelete} className="flex-1 py-3.5 rounded-[14px] text-sm font-bold border-none cursor-pointer" style={{ background: "linear-gradient(135deg, #FF6B6B, #FF4757)", color: "#fff" }}>Delete</button></div></Modal>}
-
-      {activeTab === "dashboard" && <button onClick={() => setShowForm(true)} className="fixed bottom-[100px] right-[calc(50%-200px)] w-14 h-14 rounded-2xl border-none text-[28px] font-light flex items-center justify-center z-50 cursor-pointer active:scale-90" style={{ background: `linear-gradient(135deg, ${user.color}, ${user.color}CC)`, color: "#0A0A0B", boxShadow: `0 8px 32px ${user.color}40` }}>+</button>}
-
-      <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[440px] flex pt-3 pb-5 z-40" style={{ background: "var(--nav-bg)", borderTop: "1px solid var(--nav-border)" }}>
-        {[{ id: "dashboard", label: "Home", icon: "◉" },{ id: "debts", label: "Debts", icon: "◎", badge: unsettledDebts.length },{ id: "insights", label: "Insights", icon: "✦" },{ id: "history", label: "History", icon: "↻" },{ id: "settings", label: "Settings", icon: "⚙" }].map((tab) => (
-          <button key={tab.id} onClick={() => { setActiveTab(tab.id); setExpanded(null); }} className="flex-1 flex flex-col items-center gap-1 text-[10px] border-none cursor-pointer bg-transparent relative" style={{ color: activeTab === tab.id ? user.color : "var(--text-faint)" }}>
-            <span className="text-[17px] relative">{tab.icon}{tab.badge > 0 && <span className="absolute -top-1.5 -right-2.5 w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold" style={{ background: "#FF9F43", color: "#0A0A0B" }}>{tab.badge}</span>}</span>
-            {tab.label}
-          </button>
+      {/* NAV */}
+      <div style={{ display:"flex", justifyContent:"space-around", padding:"12px 20px", borderTop:"1px solid "+t.bd, background:t.cd, position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, zIndex:40 }}>
+        {[{id:"home",l:"Home",i:"🏠"},{id:"stats",l:"Stats",i:"📊"},{id:"settings",l:"Settings",i:"⚙️"}].map(n => (
+          <div key={n.id} onClick={() => setPg(n.id)} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2, cursor:"pointer", color:pg===n.id?t.ac:t.sc, fontSize:11, fontWeight:pg===n.id?600:400 }}>
+            <span style={{ fontSize:22 }}>{n.i}</span><span>{n.l}</span>
+          </div>
         ))}
       </div>
+
+      {/* ADD EXPENSE MODAL */}
+      {showAdd && (
+        <div style={modBg} onClick={e => e.target === e.currentTarget && setShowAdd(false)}>
+          <div style={sheet}>
+            <div style={handle} />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <h3 style={{ fontSize:20, fontWeight:700 }}>Add Expense</h3>
+              <span style={{ cursor:"pointer", fontSize:20, color:t.sc }} onClick={() => setShowAdd(false)}>✕</span>
+            </div>
+            <div style={{ display:"flex", justifyContent:"center", gap:16, marginBottom:10 }}>
+              {[
+                { i:"🎤", l:"Voice", a:() => listening ? recRef.current?.stop() : startListen(), on:listening },
+                { i:"📷", l:"Camera", a:() => camRef.current?.click() },
+                { i:"🖼️", l:"Gallery", a:() => fileRef.current?.click() },
+              ].map(b => (
+                <div key={b.l} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:5 }}>
+                  <button onClick={b.a} style={mic(b.on)}>{b.i}</button>
+                  <span style={{ fontSize:11, color:t.sc }}>{b.l}</span>
+                </div>
+              ))}
+            </div>
+            <input type="file" accept="image/*" capture="environment" ref={camRef} style={{ display:"none" }} onChange={onReceipt} />
+            <input type="file" accept="image/*" ref={fileRef} style={{ display:"none" }} onChange={onReceipt} />
+            <div style={{ textAlign:"center", fontSize:12, color:t.sc, marginBottom:14 }}>{listening ? "🔴 Listening..." : "Tap voice, or snap a receipt for reference"}</div>
+
+            {rcImg && (
+              <div style={{ marginBottom:14, position:"relative" }}>
+                <div style={{ borderRadius:14, overflow:"hidden", border:"1px solid "+t.bd }}>
+                  <img src={rcImg} alt="Receipt" style={{ width:"100%", maxHeight:180, objectFit:"cover", display:"block" }} />
+                </div>
+                <div style={{ textAlign:"center", fontSize:11, color:t.sc, marginTop:6 }}>📎 Receipt attached — enter details below</div>
+                <div style={{ textAlign:"center", fontSize:11, color:t.ac, marginTop:4, cursor:"pointer" }}>💎 Upgrade to Pro for auto receipt scanning</div>
+                <button onClick={clrReceipt} style={{ position:"absolute", top:8, right:8, width:26, height:26, borderRadius:"50%", background:"rgba(0,0,0,0.7)", color:"#fff", border:"none", cursor:"pointer", fontSize:13, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+              </div>
+            )}
+
+            <div style={{ display:"flex", gap:10, marginBottom:12 }}>
+              <input style={{ ...inp, flex:1 }} type="text" inputMode="decimal" placeholder="Amount (e.g. €50, £30, $25)" value={eAmt} onChange={e => {
+                const v = e.target.value;
+                setEAmt(v);
+                const d = detectCurrency(v);
+                if (d.currency && d.currency !== eCurr) setECurr(d.currency);
+              }} />
+              <select style={{ ...inp, width:88, appearance:"auto" }} value={eCurr} onChange={e => setECurr(e.target.value)}>{CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}</select>
+            </div>
+            {eCurr !== bCurr && eAmt && <div style={{ fontSize:12, color:t.sc, marginBottom:8, textAlign:"right" }}>{"≈ "+fmtM(cnv(detectCurrency(eAmt).amount || parseFloat(eAmt) || 0, eCurr, bCurr), bCurr)}</div>}
+            <input style={{ ...inp, marginBottom:12 }} placeholder="Description (optional)" value={eDesc} onChange={e => setEDesc(e.target.value)} />
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:8, marginBottom:bizMode?8:16 }}>
+              {cats.map(cat => (
+                <div key={cat.name} onClick={() => setECat(cat.name)} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3, padding:"10px 4px", borderRadius:12, background:eCat===cat.name?t.ac:t.al, border:"1px solid "+(eCat===cat.name?t.ac:t.bd), cursor:"pointer" }}>
+                  <span style={{ fontSize:20 }}>{cat.emoji}</span>
+                  <span style={{ fontSize:8, color:eCat===cat.name?"#fff":t.sc }}>{cat.name}</span>
+                </div>
+              ))}
+              {bizMode && (
+                <div onClick={() => setShowAddCat(true)} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3, padding:"10px 4px", borderRadius:12, background:t.al, border:"1px dashed "+t.ac, cursor:"pointer" }}>
+                  <span style={{ fontSize:20 }}>➕</span>
+                  <span style={{ fontSize:8, color:t.ac }}>Custom</span>
+                </div>
+              )}
+            </div>
+            {bizMode && (
+              <div onClick={() => setEIsTax(!eIsTax)} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px", borderRadius:12, background:eIsTax?t.gn+"15":t.al, border:"1px solid "+(eIsTax?t.gn+"40":t.bd), marginBottom:12, cursor:"pointer" }}>
+                <span style={{ fontSize:18 }}>{eIsTax ? "✅" : "⬜"}</span>
+                <span style={{ fontSize:13, color:eIsTax?t.gn:t.sc }}>Tax Deductible</span>
+              </div>
+            )}
+            <button style={{ ...btn(), opacity:eAmt&&eCat?1:0.4 }} onClick={addExpense}>Add Expense</button>
+          </div>
+        </div>
+      )}
+
+      {/* ALL TRANSACTIONS */}
+      {showTxn && (
+        <div style={modBg} onClick={e => e.target === e.currentTarget && setShowTxn(false)}>
+          <div style={sheet}>
+            <div style={handle} />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <h3 style={{ fontSize:20, fontWeight:700 }}>All Transactions</h3>
+              <span style={{ cursor:"pointer", fontSize:20, color:t.sc }} onClick={() => setShowTxn(false)}>✕</span>
+            </div>
+            {exps.length === 0 ? <div style={{ textAlign:"center", padding:40, color:t.sc }}>No transactions</div> : exps.map(e => <TxRow key={e.id} e={e} canDel={true} />)}
+          </div>
+        </div>
+      )}
+
+      {/* CHARTS */}
+      {showCht && (
+        <div style={modBg} onClick={e => e.target === e.currentTarget && setShowCht(false)}>
+          <div style={sheet}>
+            <div style={handle} />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <h3 style={{ fontSize:20, fontWeight:700 }}>Charts</h3>
+              <span style={{ cursor:"pointer", fontSize:20, color:t.sc }} onClick={() => setShowCht(false)}>✕</span>
+            </div>
+            <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+              {[["category","Category"],["week","Week"],["month","Month"]].map(([id,lb]) => (
+                <div key={id} onClick={() => setCTab(id)} style={pill(cTab===id)}>{lb}</div>
+              ))}
+            </div>
+            <div style={{ ...crd, padding:"12px 8px" }}>
+              {cTab === "category" && <Chart data={catChartData} colorFn={(l) => cats.find(c=>c.name===l)?.color || t.ac} />}
+              {cTab === "week" && <Chart data={weekChartData} colorFn={(_,i) => ["#6C63FF","#4facfe","#43e97b","#f5af19"][i%4]} />}
+              {cTab === "month" && <Chart data={moChartData} colorFn={(_,i) => ["#f093fb","#6C63FF","#4facfe","#43e97b","#f5af19","#fa709a"][i%6]} />}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI INSIGHTS */}
+      {showIns && (
+        <div style={modBg} onClick={e => e.target === e.currentTarget && setShowIns(false)}>
+          <div style={sheet}>
+            <div style={handle} />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <h3 style={{ fontSize:20, fontWeight:700 }}>🤖 AI Insights</h3>
+              <span style={{ cursor:"pointer", fontSize:20, color:t.sc }} onClick={() => setShowIns(false)}>✕</span>
+            </div>
+            {insights.map((x,i) => <div key={i} style={{ padding:16, borderRadius:14, background:t.al, border:"1px solid "+t.bd, marginBottom:10, fontSize:14, lineHeight:1.6 }}>{x}</div>)}
+          </div>
+        </div>
+      )}
+
+      {/* MONTHLY REPORT */}
+      {showRep && (
+        <div style={modBg} onClick={e => e.target === e.currentTarget && setShowRep(false)}>
+          <div style={sheet}>
+            <div style={handle} />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <h3 style={{ fontSize:20, fontWeight:700 }}>📑 Monthly Report</h3>
+              <span style={{ cursor:"pointer", fontSize:20, color:t.sc }} onClick={() => setShowRep(false)}>✕</span>
+            </div>
+            {report.map((x,i) => <div key={i} style={{ padding:16, borderRadius:14, background:t.al, border:"1px solid "+t.bd, marginBottom:10, fontSize:14, lineHeight:1.7, whiteSpace:"pre-line" }}>{x}</div>)}
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRMATION MODAL */}
+      {confirmAction && (
+        <div style={modBg} onClick={e => e.target === e.currentTarget && setConfirmAction(null)}>
+          <div style={{ width:"100%", maxWidth:380, background:t.cd, borderRadius:24, padding:28, margin:"auto", animation:"fadeIn 0.2s", textAlign:"center" }}>
+            <div style={{ fontSize:48, marginBottom:16 }}>{confirmAction === "reset" ? "🗑️" : "🔄"}</div>
+            <h3 style={{ fontSize:20, fontWeight:700, marginBottom:8 }}>
+              {confirmAction === "reset" ? "Reset All Data?" : "Start Fresh?"}
+            </h3>
+            <p style={{ fontSize:14, color:t.sc, lineHeight:1.5, marginBottom:24 }}>
+              {confirmAction === "reset"
+                ? "This will delete all your expenses and alert history. This cannot be undone."
+                : "This will erase everything and take you back to the beginning. All data will be lost."
+              }
+            </p>
+            <div style={{ display:"flex", gap:10 }}>
+              <button style={{ ...btn(t.al), flex:1, color:t.tx, border:"1px solid "+t.bd }} onClick={() => setConfirmAction(null)}>Cancel</button>
+              <button style={{ ...btn(t.rd), flex:1 }} onClick={() => {
+                if (confirmAction === "reset") {
+                  setExps([]); setAlerts([]);
+                } else {
+                  setOnboarded(false); setObStep(0); setExps([]); setAlerts([]);
+                  localStorage.removeItem("btv2");
+                }
+                setConfirmAction(null);
+              }}>
+                {confirmAction === "reset" ? "Delete All" : "Start Over"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ADD CUSTOM CATEGORY (Business) */}
+      {showAddCat && (
+        <div style={modBg} onClick={e => e.target === e.currentTarget && setShowAddCat(false)}>
+          <div style={{ width:"100%", maxWidth:380, background:t.cd, borderRadius:24, padding:28, margin:"auto", animation:"fadeIn 0.2s" }}>
+            <div style={{ textAlign:"center", marginBottom:16 }}>
+              <div style={{ fontSize:48, marginBottom:8 }}>{newCatEmoji}</div>
+              <h3 style={{ fontSize:20, fontWeight:700 }}>New Category</h3>
+            </div>
+            <input style={{ ...inp, marginBottom:12 }} placeholder="Category name" value={newCatName} onChange={e => setNewCatName(e.target.value)} />
+            <div style={{ fontSize:13, color:t.sc, marginBottom:8 }}>Pick an emoji</div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(8,1fr)", gap:6, marginBottom:16 }}>
+              {["📁","🏗️","🎨","📞","🚚","🍽️","🛠️","💡","📊","🏪","🎯","🔬","📦","🏥","🎪","⚡","🔌","💳","🏦","📱","🖥️","🎓","🛒","✂️"].map(em => (
+                <div key={em} onClick={() => setNewCatEmoji(em)} style={{ width:36, height:36, borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, cursor:"pointer", background:newCatEmoji===em?t.ac:t.al, border:"1px solid "+(newCatEmoji===em?t.ac:t.bd) }}>{em}</div>
+              ))}
+            </div>
+            <div style={{ display:"flex", gap:10 }}>
+              <button style={{ ...btn(t.al), flex:1, color:t.tx, border:"1px solid "+t.bd }} onClick={() => setShowAddCat(false)}>Cancel</button>
+              <button style={{ ...btn(), flex:1, opacity:newCatName?1:0.4 }} onClick={() => {
+                if (!newCatName) return;
+                const colors = ["#667eea","#f093fb","#6C63FF","#0fd850","#f78ca0","#4facfe","#f5af19","#fa709a","#43e97b","#a18cd1"];
+                const col = colors[cats.length % colors.length];
+                setCats(p => [...p, { name: newCatName, emoji: newCatEmoji, color: col }]);
+                setECat(newCatName);
+                setNewCatName(""); setNewCatEmoji("📁"); setShowAddCat(false);
+              }}>Add Category</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* INVOICE MODAL */}
+      {showInvoice && (
+        <div style={modBg} onClick={e => e.target === e.currentTarget && setShowInvoice(false)}>
+          <div style={sheet}>
+            <div style={handle} />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <h3 style={{ fontSize:20, fontWeight:700 }}>🧾 Invoices</h3>
+              <span style={{ cursor:"pointer", fontSize:20, color:t.sc }} onClick={() => setShowInvoice(false)}>✕</span>
+            </div>
+            <div style={{ padding:16, borderRadius:14, background:t.al, border:"1px solid "+t.bd, marginBottom:16 }}>
+              <input style={{ ...inp, marginBottom:8 }} placeholder="Invoice description" value={iName} onChange={e => setIName(e.target.value)} />
+              <div style={{ display:"flex", gap:8, marginBottom:8 }}>
+                <input style={{ ...inp, flex:1 }} type="number" placeholder="Amount" value={iAmt} onChange={e => setIAmt(e.target.value)} />
+                <input style={{ ...inp, flex:1 }} placeholder="Client name" value={iClient} onChange={e => setIClient(e.target.value)} />
+              </div>
+              <button style={{ ...btn(), opacity:iName&&iAmt?1:0.4 }} onClick={() => {
+                if (!iName || !iAmt) return;
+                setInvoices(p => [{ id: Date.now(), name: iName, amt: parseFloat(iAmt), client: iClient, paid: false, date: new Date().toISOString() }, ...p]);
+                setIName(""); setIAmt(""); setIClient("");
+              }}>Create Invoice</button>
+            </div>
+            {invoices.length === 0 ? (
+              <div style={{ textAlign:"center", padding:24, color:t.sc }}>No invoices yet</div>
+            ) : (
+              <>
+                <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+                  <div style={{ flex:1, padding:10, borderRadius:10, background:t.wn+"12", textAlign:"center" }}><div style={{ fontSize:11, color:t.sc }}>Unpaid</div><div style={{ fontSize:16, fontWeight:700, color:t.wn }}>{fmtM(unpaidInv.reduce((s,i)=>s+i.amt,0), bCurr)}</div></div>
+                  <div style={{ flex:1, padding:10, borderRadius:10, background:t.gn+"12", textAlign:"center" }}><div style={{ fontSize:11, color:t.sc }}>Paid</div><div style={{ fontSize:16, fontWeight:700, color:t.gn }}>{fmtM(paidInv.reduce((s,i)=>s+i.amt,0), bCurr)}</div></div>
+                </div>
+                {invoices.map(inv => (
+                  <div key={inv.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 14px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:8 }}>
+                    <div style={{ width:40, height:40, borderRadius:12, background:inv.paid?t.gn+"20":t.wn+"20", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>{inv.paid?"✅":"📄"}</div>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontWeight:600, fontSize:14 }}>{inv.name}</div>
+                      <div style={{ fontSize:12, color:t.sc }}>{inv.client || "No client"} · {new Date(inv.date).toLocaleDateString("en",{month:"short",day:"numeric"})}</div>
+                    </div>
+                    <span style={{ fontWeight:700, fontSize:14, color:inv.paid?t.gn:t.tx }}>{fmtM(inv.amt, bCurr)}</span>
+                    <span style={{ cursor:"pointer", padding:6, fontSize:12, color:t.ac }} onClick={() => setInvoices(p => p.map(i => i.id === inv.id ? {...i, paid:!i.paid} : i))}>{inv.paid?"Undo":"Pay"}</span>
+                    <span style={{ cursor:"pointer", color:t.sc, padding:4 }} onClick={() => setInvoices(p => p.filter(i => i.id !== inv.id))}>✕</span>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* REVENUE MODAL */}
+      {showRevenue && (
+        <div style={modBg} onClick={e => e.target === e.currentTarget && setShowRevenue(false)}>
+          <div style={sheet}>
+            <div style={handle} />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <h3 style={{ fontSize:20, fontWeight:700 }}>💵 Revenue</h3>
+              <span style={{ cursor:"pointer", fontSize:20, color:t.sc }} onClick={() => setShowRevenue(false)}>✕</span>
+            </div>
+            <div style={{ padding:16, borderRadius:14, background:t.al, border:"1px solid "+t.bd, marginBottom:16 }}>
+              <input style={{ ...inp, marginBottom:8 }} type="number" placeholder="Amount" value={rvAmt} onChange={e => setRvAmt(e.target.value)} />
+              <input style={{ ...inp, marginBottom:8 }} placeholder="Description (e.g. Client payment)" value={rvDesc} onChange={e => setRvDesc(e.target.value)} />
+              <input style={{ ...inp, marginBottom:8 }} placeholder="Source (e.g. Freelance, Sales)" value={rvSrc} onChange={e => setRvSrc(e.target.value)} />
+              <button style={{ ...btn(), background:"linear-gradient(135deg,"+t.gn+",#43e97b)", opacity:rvAmt?1:0.4 }} onClick={() => {
+                if (!rvAmt) return;
+                setRevenue(p => [{ id: Date.now(), amt: parseFloat(rvAmt), desc: rvDesc || "Revenue", source: rvSrc, date: new Date().toISOString() }, ...p]);
+                setRvAmt(""); setRvDesc(""); setRvSrc("");
+              }}>Add Revenue</button>
+            </div>
+            <div style={{ padding:"10px 14px", borderRadius:10, background:t.gn+"12", marginBottom:12, textAlign:"center" }}>
+              <div style={{ fontSize:11, color:t.sc }}>This Month</div>
+              <div style={{ fontSize:20, fontWeight:700, color:t.gn }}>{fmtM(totalRev, bCurr)}</div>
+            </div>
+            {revenue.length === 0 ? (
+              <div style={{ textAlign:"center", padding:24, color:t.sc }}>No revenue logged yet</div>
+            ) : revenue.map(r => (
+              <div key={r.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 14px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:8 }}>
+                <div style={{ width:40, height:40, borderRadius:12, background:t.gn+"20", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>💵</div>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontWeight:600, fontSize:14 }}>{r.desc}</div>
+                  <div style={{ fontSize:12, color:t.sc }}>{r.source || "Revenue"} · {new Date(r.date).toLocaleDateString("en",{month:"short",day:"numeric"})}</div>
+                </div>
+                <span style={{ fontWeight:700, fontSize:14, color:t.gn }}>+{fmtM(r.amt, bCurr)}</span>
+                <span style={{ cursor:"pointer", color:t.sc, padding:4 }} onClick={() => setRevenue(p => p.filter(x => x.id !== r.id))}>✕</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* P&L DASHBOARD MODAL */}
+      {showPL && (
+        <div style={modBg} onClick={e => e.target === e.currentTarget && setShowPL(false)}>
+          <div style={sheet}>
+            <div style={handle} />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <h3 style={{ fontSize:20, fontWeight:700 }}>📈 Profit & Loss</h3>
+              <span style={{ cursor:"pointer", fontSize:20, color:t.sc }} onClick={() => setShowPL(false)}>✕</span>
+            </div>
+            <div style={{ textAlign:"center", marginBottom:20 }}>
+              <div style={{ fontSize:13, color:t.sc }}>{FULL_MO[cMo]} {cYr}</div>
+            </div>
+            {/* Summary cards */}
+            <div style={{ display:"flex", gap:10, marginBottom:16 }}>
+              <div style={{ flex:1, padding:16, borderRadius:14, background:t.gn+"12", textAlign:"center" }}>
+                <div style={{ fontSize:11, color:t.sc }}>Revenue</div>
+                <div style={{ fontSize:22, fontWeight:700, color:t.gn, marginTop:4 }}>{fmtM(totalRev, bCurr)}</div>
+              </div>
+              <div style={{ flex:1, padding:16, borderRadius:14, background:t.rd+"12", textAlign:"center" }}>
+                <div style={{ fontSize:11, color:t.sc }}>Expenses</div>
+                <div style={{ fontSize:22, fontWeight:700, color:t.rd, marginTop:4 }}>{fmtM(totSpent, bCurr)}</div>
+              </div>
+            </div>
+            <div style={{ padding:20, borderRadius:14, background:profit>=0?"#4ecdc412":"#ff6b6b12", border:"1px solid "+(profit>=0?t.gn:t.rd)+"30", textAlign:"center", marginBottom:16 }}>
+              <div style={{ fontSize:13, color:t.sc }}>Net {profit>=0?"Profit":"Loss"}</div>
+              <div style={{ fontSize:32, fontWeight:700, color:profit>=0?t.gn:t.rd, marginTop:4 }}>{profit>=0?"+":""}{fmtM(profit, bCurr)}</div>
+              <div style={{ fontSize:12, color:t.sc, marginTop:4 }}>Margin: {totalRev>0?((profit/totalRev)*100).toFixed(1):0}%</div>
+            </div>
+            {/* Tax deductible summary */}
+            {taxExps.length > 0 && (
+              <div style={{ padding:14, borderRadius:14, background:t.al, border:"1px solid "+t.bd, marginBottom:16 }}>
+                <div style={{ fontSize:13, fontWeight:600, marginBottom:8 }}>📋 Tax Deductible Expenses</div>
+                <div style={{ fontSize:20, fontWeight:700, color:t.ac }}>{fmtM(taxExps.reduce((s,e)=>s+e.convAmt,0), bCurr)}</div>
+                <div style={{ fontSize:12, color:t.sc, marginTop:4 }}>{taxExps.length} tax-deductible transactions</div>
+              </div>
+            )}
+            {/* Top expense categories */}
+            <div style={{ padding:14, borderRadius:14, background:t.al, border:"1px solid "+t.bd, marginBottom:12 }}>
+              <div style={{ fontSize:13, fontWeight:600, marginBottom:10 }}>Top Expense Categories</div>
+              {Object.entries(catTotals).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([cat, amt]) => {
+                const cp = totSpent > 0 ? (amt/totSpent)*100 : 0;
+                return (
+                  <div key={cat} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
+                    <span style={{ fontSize:16 }}>{cats.find(c=>c.name===cat)?.emoji||"💰"}</span>
+                    <div style={{ flex:1 }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, marginBottom:3 }}><span>{cat}</span><span style={{ color:t.sc }}>{fmtM(amt,bCurr)} ({cp.toFixed(0)}%)</span></div>
+                      <div style={{ width:"100%", height:4, borderRadius:2, background:t.bd }}><div style={{ height:"100%", borderRadius:2, width:cp+"%", background:cats.find(c=>c.name===cat)?.color||t.ac }} /></div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Revenue sources */}
+            {moRevenue.length > 0 && (
+              <div style={{ padding:14, borderRadius:14, background:t.al, border:"1px solid "+t.bd }}>
+                <div style={{ fontSize:13, fontWeight:600, marginBottom:10 }}>Revenue Sources</div>
+                {moRevenue.map(r => (
+                  <div key={r.id} style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", fontSize:13 }}>
+                    <span>{r.desc}</span><span style={{ color:t.gn, fontWeight:600 }}>+{fmtM(r.amt, bCurr)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* UPGRADE MODAL */}
+      {showUpgrade && (
+        <div style={modBg} onClick={e => e.target === e.currentTarget && setShowUpgrade(false)}>
+          <div style={{ width:"100%", maxWidth:400, background:t.cd, borderRadius:24, padding:28, margin:"auto", animation:"fadeIn 0.2s" }}>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ fontSize:48, marginBottom:8 }}>💎</div>
+              <h3 style={{ fontSize:22, fontWeight:700, marginBottom:4 }}>Upgrade to Pro</h3>
+              <p style={{ fontSize:13, color:t.sc, marginBottom:20 }}>Unlock the full power of Your Budget Tracker</p>
+            </div>
+            {["🧾 Auto receipt scanning (AI-powered)","🔁 Recurring expenses (rent, bills, subscriptions)","🏠 Budget pre-allocation (see true spendable amount)","🎯 Category spending limits with alerts","📤 Export data as CSV or PDF","🗣️ Voice currency detection (coming soon)","☁️ Cloud sync across devices (coming soon)"].map(f => (
+              <div key={f} style={{ padding:"10px 14px", borderRadius:10, background:t.al, marginBottom:6, fontSize:13, display:"flex", alignItems:"center", gap:8 }}>
+                <span style={{ color:t.gn }}>✓</span><span>{f}</span>
+              </div>
+            ))}
+            <div style={{ marginTop:20, padding:"14px 16px", borderRadius:14, background:t.al, border:"1px solid "+t.bd }}>
+              <div style={{ fontSize:12, color:t.sc, marginBottom:8 }}>Have a Pro code?</div>
+              <div style={{ display:"flex", gap:8 }}>
+                <input style={{ ...inp, flex:1, fontSize:14 }} placeholder="Enter code" value={proCode} onChange={e => setProCode(e.target.value.toUpperCase())} />
+                <button style={{ ...btn(), padding:"12px 20px", fontSize:14 }} onClick={() => {
+                  if (proCode === PRO_CODE) { setIsPro(true); setShowUpgrade(false); setProCode(""); }
+                  else { alert("Invalid code"); }
+                }}>Activate</button>
+              </div>
+            </div>
+            <button style={{ background:"none", border:"none", color:t.sc, fontSize:13, cursor:"pointer", padding:12, width:"100%", marginTop:8 }} onClick={() => setShowUpgrade(false)}>Maybe later</button>
+          </div>
+        </div>
+      )}
+
+      {/* BUSINESS UPGRADE MODAL */}
+      {showBizUpgrade && (
+        <div style={modBg} onClick={e => e.target === e.currentTarget && setShowBizUpgrade(false)}>
+          <div style={{ width:"100%", maxWidth:400, background:t.cd, borderRadius:24, padding:28, margin:"auto", animation:"fadeIn 0.2s" }}>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ fontSize:48, marginBottom:8 }}>💼</div>
+              <h3 style={{ fontSize:22, fontWeight:700, marginBottom:4 }}>Upgrade to Business</h3>
+              <p style={{ fontSize:13, color:t.sc, marginBottom:20 }}>Full business expense management</p>
+            </div>
+            {["💼 Business expense categories","📋 Tax-deductible expense tagging","🧾 Invoice tracking (create, send, track)","💵 Revenue & income logging","📈 P&L Dashboard (profit/loss, margins)","🔁 Recurring expenses & pre-allocation","🎯 Category spending limits","📤 Export reports (coming soon)"].map(f => (
+              <div key={f} style={{ padding:"10px 14px", borderRadius:10, background:t.al, marginBottom:6, fontSize:13, display:"flex", alignItems:"center", gap:8 }}>
+                <span style={{ color:t.gn }}>✓</span><span>{f}</span>
+              </div>
+            ))}
+            <div style={{ marginTop:20, padding:"14px 16px", borderRadius:14, background:t.al, border:"1px solid "+t.bd }}>
+              <div style={{ fontSize:12, color:t.sc, marginBottom:8 }}>Have a Business code?</div>
+              <div style={{ display:"flex", gap:8 }}>
+                <input style={{ ...inp, flex:1, fontSize:14 }} placeholder="Enter code" value={bizCode} onChange={e => setBizCode(e.target.value.toUpperCase())} />
+                <button style={{ ...btn(), padding:"12px 20px", fontSize:14, background:"linear-gradient(135deg,#f5af19,#f093fb)" }} onClick={() => {
+                  if (bizCode === BIZ_CODE) { setIsBiz(true); setIsPro(true); setActiveMode("business"); setBizMode(true); setCats(DEF_BIZ_CATS); setShowBizUpgrade(false); setBizCode(""); }
+                  else { alert("Invalid code"); }
+                }}>Activate</button>
+              </div>
+            </div>
+            <button style={{ background:"none", border:"none", color:t.sc, fontSize:13, cursor:"pointer", padding:12, width:"100%", marginTop:8 }} onClick={() => setShowBizUpgrade(false)}>Maybe later</button>
+          </div>
+        </div>
+      )}
+
+      {/* RECURRING EXPENSES MODAL (Pro) */}
+      {showRecurring && (
+        <div style={modBg} onClick={e => e.target === e.currentTarget && setShowRecurring(false)}>
+          <div style={sheet}>
+            <div style={handle} />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <h3 style={{ fontSize:20, fontWeight:700 }}>🔁 Recurring Expenses</h3>
+              <span style={{ cursor:"pointer", fontSize:20, color:t.sc }} onClick={() => setShowRecurring(false)}>✕</span>
+            </div>
+            <p style={{ fontSize:12, color:t.sc, marginBottom:16 }}>Fixed monthly costs deducted from your budget upfront.</p>
+
+            {/* Add new recurring */}
+            <div style={{ padding:16, borderRadius:14, background:t.al, border:"1px solid "+t.bd, marginBottom:16 }}>
+              <input style={{ ...inp, marginBottom:8 }} placeholder="Name (e.g. Rent, Netflix)" value={rName} onChange={e => setRName(e.target.value)} />
+              <div style={{ display:"flex", gap:8, marginBottom:8 }}>
+                <input style={{ ...inp, flex:1 }} type="number" placeholder="Amount" value={rAmt} onChange={e => setRAmt(e.target.value)} />
+                <select style={{ ...inp, width:100, appearance:"auto" }} value={rCat} onChange={e => setRCat(e.target.value)}>
+                  {cats.map(c => <option key={c.name} value={c.name}>{c.emoji} {c.name}</option>)}
+                </select>
+              </div>
+              <button style={{ ...btn(), opacity:rName&&rAmt?1:0.4 }} onClick={() => {
+                if (!rName || !rAmt) return;
+                setRecurring(p => [...p, { id: Date.now(), name: rName, amt: parseFloat(rAmt), cat: rCat }]);
+                setRName(""); setRAmt("");
+              }}>Add Recurring Expense</button>
+            </div>
+
+            {/* List */}
+            {recurring.length === 0 ? (
+              <div style={{ textAlign:"center", padding:24, color:t.sc }}>No recurring expenses yet</div>
+            ) : (
+              <>
+                <div style={{ padding:"10px 14px", borderRadius:10, background:t.ac+"12", marginBottom:12, fontSize:13, color:t.ac, fontWeight:600, textAlign:"center" }}>
+                  Total: {fmtM(recurTotal, bCurr)}/month · Spendable: {fmtM(spendable, bCurr)}
+                </div>
+                {recurring.map(r => (
+                  <div key={r.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 14px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:8 }}>
+                    <div style={{ width:40, height:40, borderRadius:12, background:t.al, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>
+                      {cats.find(c => c.name === r.cat)?.emoji || "💰"}
+                    </div>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontWeight:600, fontSize:14 }}>{r.name}</div>
+                      <div style={{ fontSize:12, color:t.sc }}>{r.cat} · Monthly</div>
+                    </div>
+                    <span style={{ fontWeight:700, fontSize:14 }}>{fmtM(r.amt, bCurr)}</span>
+                    <span style={{ cursor:"pointer", color:t.sc, padding:4 }} onClick={() => setRecurring(p => p.filter(x => x.id !== r.id))}>✕</span>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* CATEGORY BUDGETS MODAL (Pro) */}
+      {showCatBdgt && (
+        <div style={modBg} onClick={e => e.target === e.currentTarget && setShowCatBdgt(false)}>
+          <div style={sheet}>
+            <div style={handle} />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <h3 style={{ fontSize:20, fontWeight:700 }}>🎯 Category Budgets</h3>
+              <span style={{ cursor:"pointer", fontSize:20, color:t.sc }} onClick={() => setShowCatBdgt(false)}>✕</span>
+            </div>
+            <p style={{ fontSize:12, color:t.sc, marginBottom:16 }}>Set spending limits per category. Get alerted when you're close.</p>
+            {cats.map(cat => {
+              const spent = catTotals[cat.name] || 0;
+              const limit = catBudgets[cat.name] || 0;
+              const catPct = limit > 0 ? Math.min((spent / limit) * 100, 100) : 0;
+              return (
+                <div key={cat.name} style={{ padding:14, borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:10 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
+                    <span style={{ fontSize:22 }}>{cat.emoji}</span>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontWeight:600, fontSize:14 }}>{cat.name}</div>
+                      <div style={{ fontSize:12, color:t.sc }}>Spent: {fmtM(spent, bCurr)}{limit > 0 ? (" / "+fmtM(limit, bCurr)) : ""}</div>
+                    </div>
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                    <input style={{ ...inp, flex:1, padding:"10px 12px", fontSize:14 }} type="number" placeholder="Set limit" value={catBudgets[cat.name] || ""} onChange={e => setCatBudgets(p => ({ ...p, [cat.name]: parseFloat(e.target.value) || 0 }))} />
+                    <span style={{ fontSize:12, color:t.sc, minWidth:40 }}>{bCurr}</span>
+                  </div>
+                  {limit > 0 && (
+                    <div style={{ marginTop:8 }}>
+                      <div style={{ width:"100%", height:6, borderRadius:3, background:t.al, overflow:"hidden" }}>
+                        <div style={{ height:"100%", borderRadius:3, width:catPct+"%", background:catPct>85?t.rd:catPct>65?t.wn:t.gn, transition:"width 0.3s" }} />
+                      </div>
+                      <div style={{ fontSize:11, color:catPct>85?t.rd:t.sc, marginTop:4, textAlign:"right" }}>{catPct.toFixed(0)}% used</div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
