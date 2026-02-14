@@ -121,6 +121,17 @@ export default function BudgetTrackerV2() {
   const camRef = useRef(null);
   const [cTab, setCTab] = useState("category");
   const [confirmAction, setConfirmAction] = useState(null);
+  const [isPro, setIsPro] = useState(false);
+  const [showUpgrade, setShowUpgrade] = useState(false);
+  const [proCode, setProCode] = useState("");
+  const [recurring, setRecurring] = useState([]);
+  const [catBudgets, setCatBudgets] = useState({});
+  const [showRecurring, setShowRecurring] = useState(false);
+  const [showCatBdgt, setShowCatBdgt] = useState(false);
+  const [rName, setRName] = useState("");
+  const [rAmt, setRAmt] = useState("");
+  const [rCat, setRCat] = useState("Housing");
+  const PRO_CODE = "MALIK2026";
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -140,6 +151,9 @@ export default function BudgetTrackerV2() {
         if (s.notifOn) setNotifOn(s.notifOn);
         if (s.dailyRem) setDailyRem(s.dailyRem);
         if (s.alerts) setAlerts(s.alerts);
+        if (s.isPro) setIsPro(true);
+        if (s.recurring) setRecurring(s.recurring);
+        if (s.catBudgets) setCatBudgets(s.catBudgets);
       }
     } catch (e) { console.log("Load error", e); }
   }, []);
@@ -149,10 +163,10 @@ export default function BudgetTrackerV2() {
     if (!onboarded) return;
     try {
       localStorage.setItem("btv2", JSON.stringify({
-        onboarded, bCurr, cats, budget, uName, exps, dk, warnAt, alertAt, notifOn, dailyRem, alerts
+        onboarded, bCurr, cats, budget, uName, exps, dk, warnAt, alertAt, notifOn, dailyRem, alerts, isPro, recurring, catBudgets
       }));
     } catch (e) { console.log("Save error", e); }
-  }, [onboarded, bCurr, cats, budget, uName, exps, dk, warnAt, alertAt, notifOn, dailyRem, alerts]);
+  }, [onboarded, bCurr, cats, budget, uName, exps, dk, warnAt, alertAt, notifOn, dailyRem, alerts, isPro, recurring, catBudgets]);
 
   // Theme
   const t = dk
@@ -172,6 +186,11 @@ export default function BudgetTrackerV2() {
   const todaySpent = todayExps.reduce((s, e) => s + e.convAmt, 0);
   const bCol = barColor(pct);
   const catTotals = moExps.reduce((a, e) => { a[e.category] = (a[e.category] || 0) + e.convAmt; return a; }, {});
+
+  // Premium: Recurring & Pre-allocation
+  const recurTotal = recurring.reduce((s, r) => s + r.amt, 0);
+  const spendable = budget - recurTotal;
+  const adjRemain = isPro ? spendable - totSpent : remain;
 
   // Voice
   const startListen = () => {
@@ -416,11 +435,27 @@ export default function BudgetTrackerV2() {
             <h2 style={{ fontSize:22, fontWeight:700, marginBottom:4 }}>Monthly budget</h2>
             <p style={{ color:t.sc, marginBottom:24 }}>In {(CURRENCIES.find(c=>c.code===obCurr)||{}).symbol}{obCurr}</p>
             <input style={{ ...inp, fontSize:32, textAlign:"center", fontWeight:700 }} type="number" value={obBdgt} onChange={e => setObBdgt(e.target.value)} />
-            <button style={{ ...btn(), marginTop:24 }} onClick={finishOb}>Let's Go! 🚀</button>
+            <button style={{ ...btn(), marginTop:24 }} onClick={() => setObStep(4)}>Let's Go! 🚀</button>
+          </div>
+        )}
+        {obStep === 4 && (
+          <div style={{ textAlign:"center", animation:"fadeIn 0.5s" }}>
+            <div style={{ fontSize:48, marginBottom:12 }}>💎</div>
+            <h2 style={{ fontSize:22, fontWeight:700, marginBottom:4 }}>Go Pro?</h2>
+            <p style={{ color:t.sc, marginBottom:20 }}>Unlock powerful features</p>
+            <div style={{ textAlign:"left", marginBottom:20 }}>
+              {["🧾 Auto receipt scanning","🔁 Recurring expenses (rent, bills)","🏠 Budget pre-allocation","🎯 Category spending limits","📤 Export CSV & PDF"].map(f => (
+                <div key={f} style={{ padding:"10px 14px", borderRadius:10, background:t.cd, border:"1px solid "+t.bd, marginBottom:6, fontSize:13, display:"flex", alignItems:"center", gap:10 }}>
+                  <span>{f}</span>
+                </div>
+              ))}
+            </div>
+            <button style={{ ...btn(), marginBottom:10, background:"linear-gradient(135deg,#6C63FF,#8b7aff)" }} onClick={() => setShowUpgrade(true)}>Upgrade to Pro 💎</button>
+            <button style={{ background:"none", border:"none", color:t.sc, fontSize:14, cursor:"pointer", padding:10 }} onClick={finishOb}>Skip for now →</button>
           </div>
         )}
         <div style={{ display:"flex", justifyContent:"center", gap:8, marginTop:24 }}>
-          {[0,1,2,3].map(i => <div key={i} style={{ width:i===obStep?24:8, height:8, borderRadius:4, background:i===obStep?t.ac:t.bd, transition:"all 0.3s" }} />)}
+          {[0,1,2,3,4].map(i => <div key={i} style={{ width:i===obStep?24:8, height:8, borderRadius:4, background:i===obStep?t.ac:t.bd, transition:"all 0.3s" }} />)}
         </div>
       </div>
     );
@@ -472,6 +507,45 @@ export default function BudgetTrackerV2() {
             <div style={{ margin:"0 20px 12px", padding:"12px 16px", borderRadius:12, background:t.wn+"15", border:"1px solid "+t.wn+"40", display:"flex", alignItems:"center", gap:10 }}>
               <span style={{ fontSize:22 }}>⚠️</span>
               <span style={{ fontSize:13, color:t.wn, fontWeight:500 }}>Warning: {pct.toFixed(0)}% budget used.</span>
+            </div>
+          )}
+
+          {/* Pro Banner (free users) */}
+          {!isPro && (
+            <div onClick={() => setShowUpgrade(true)} style={{ margin:"0 20px 12px", padding:"12px 16px", borderRadius:14, background:"linear-gradient(135deg,#6C63FF10,#8b7aff10)", border:"1px solid #6C63FF30", display:"flex", alignItems:"center", gap:12, cursor:"pointer" }}>
+              <span style={{ fontSize:22 }}>💎</span>
+              <div style={{ flex:1 }}><div style={{ fontSize:13, fontWeight:600, color:t.ac }}>Upgrade to Pro</div><div style={{ fontSize:11, color:t.sc }}>Auto receipts, recurring bills, category limits & more</div></div>
+              <span style={{ color:t.ac, fontSize:16 }}>›</span>
+            </div>
+          )}
+
+          {/* Pre-allocation card (Pro users) */}
+          {isPro && recurring.length > 0 && (
+            <div style={{ margin:"0 20px 12px", padding:"14px 16px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                <div style={{ fontSize:13, fontWeight:600 }}>💎 Fixed Costs Pre-Allocated</div>
+                <span style={{ fontSize:12, color:t.sc }}>{fmtM(recurTotal, bCurr)}/mo</span>
+              </div>
+              <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:t.sc }}>
+                <span>Budget: {fmtM(budget, bCurr)}</span>
+                <span>Spendable: <span style={{ color:t.gn, fontWeight:600 }}>{fmtM(spendable, bCurr)}</span></span>
+              </div>
+            </div>
+          )}
+
+          {/* Category budget alerts (Pro) */}
+          {isPro && Object.entries(catBudgets).filter(([cat, lim]) => lim > 0 && (catTotals[cat] || 0) >= lim * 0.85).length > 0 && (
+            <div style={{ padding:"0 20px", marginBottom:12 }}>
+              {Object.entries(catBudgets).filter(([cat, lim]) => lim > 0 && (catTotals[cat] || 0) >= lim * 0.85).map(([cat, lim]) => {
+                const spent = catTotals[cat] || 0;
+                const over = spent >= lim;
+                return (
+                  <div key={cat} style={{ padding:"10px 14px", borderRadius:10, background:(over?t.rd:t.wn)+"12", border:"1px solid "+(over?t.rd:t.wn)+"30", marginBottom:6, fontSize:12, display:"flex", alignItems:"center", gap:8 }}>
+                    <span>{cats.find(c=>c.name===cat)?.emoji}</span>
+                    <span style={{ color:over?t.rd:t.wn }}>{over?"🚨":"⚠️"} {cat}: {fmtM(spent,bCurr)} / {fmtM(lim,bCurr)}</span>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -611,6 +685,32 @@ export default function BudgetTrackerV2() {
                     <div style={{ fontSize:11, color:t.sc, marginTop:4 }}>{new Date(a.d).toLocaleString()}</div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            <div style={{ fontSize:14, fontWeight:600, color:t.sc, marginBottom:10, marginTop:20, textTransform:"uppercase", letterSpacing:1 }}>Pro Features</div>
+            {isPro ? (
+              <div style={{ marginBottom:20 }}>
+                <div style={{ padding:"12px 16px", borderRadius:14, background:"linear-gradient(135deg,#6C63FF10,#8b7aff10)", border:"1px solid #6C63FF30", marginBottom:10, display:"flex", alignItems:"center", gap:10 }}>
+                  <span style={{ fontSize:18 }}>💎</span>
+                  <span style={{ fontSize:14, fontWeight:600, color:t.ac }}>Pro Active</span>
+                </div>
+                <div onClick={() => setShowRecurring(true)} style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 16px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:8, cursor:"pointer" }}>
+                  <span style={{ fontSize:20 }}>🔁</span>
+                  <div style={{ flex:1 }}><div style={{ fontWeight:600, fontSize:14 }}>Recurring Expenses</div><div style={{ fontSize:12, color:t.sc }}>{recurring.length} items · {fmtM(recurTotal, bCurr)}/mo</div></div>
+                  <span style={{ color:t.sc }}>›</span>
+                </div>
+                <div onClick={() => setShowCatBdgt(true)} style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 16px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:8, cursor:"pointer" }}>
+                  <span style={{ fontSize:20 }}>🎯</span>
+                  <div style={{ flex:1 }}><div style={{ fontWeight:600, fontSize:14 }}>Category Budgets</div><div style={{ fontSize:12, color:t.sc }}>Set spending limits per category</div></div>
+                  <span style={{ color:t.sc }}>›</span>
+                </div>
+              </div>
+            ) : (
+              <div onClick={() => setShowUpgrade(true)} style={{ padding:"16px", borderRadius:14, background:"linear-gradient(135deg,#6C63FF10,#8b7aff10)", border:"1px solid #6C63FF30", marginBottom:20, cursor:"pointer", textAlign:"center" }}>
+                <div style={{ fontSize:32, marginBottom:8 }}>💎</div>
+                <div style={{ fontSize:16, fontWeight:700, color:t.ac, marginBottom:4 }}>Upgrade to Pro</div>
+                <div style={{ fontSize:12, color:t.sc }}>Recurring bills, category limits, auto OCR & more</div>
               </div>
             )}
 
@@ -797,6 +897,130 @@ export default function BudgetTrackerV2() {
                 {confirmAction === "reset" ? "Delete All" : "Start Over"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {/* UPGRADE MODAL */}
+      {showUpgrade && (
+        <div style={modBg} onClick={e => e.target === e.currentTarget && setShowUpgrade(false)}>
+          <div style={{ width:"100%", maxWidth:400, background:t.cd, borderRadius:24, padding:28, margin:"auto", animation:"fadeIn 0.2s" }}>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ fontSize:48, marginBottom:8 }}>💎</div>
+              <h3 style={{ fontSize:22, fontWeight:700, marginBottom:4 }}>Upgrade to Pro</h3>
+              <p style={{ fontSize:13, color:t.sc, marginBottom:20 }}>Unlock the full power of Your Budget Tracker</p>
+            </div>
+            {["🧾 Auto receipt scanning (AI-powered)","🔁 Recurring expenses (rent, bills, subscriptions)","🏠 Budget pre-allocation (see true spendable amount)","🎯 Category spending limits with alerts","📤 Export data as CSV or PDF","🗣️ Voice currency detection (coming soon)","☁️ Cloud sync across devices (coming soon)"].map(f => (
+              <div key={f} style={{ padding:"10px 14px", borderRadius:10, background:t.al, marginBottom:6, fontSize:13, display:"flex", alignItems:"center", gap:8 }}>
+                <span style={{ color:t.gn }}>✓</span><span>{f}</span>
+              </div>
+            ))}
+            <div style={{ marginTop:20, padding:"14px 16px", borderRadius:14, background:t.al, border:"1px solid "+t.bd }}>
+              <div style={{ fontSize:12, color:t.sc, marginBottom:8 }}>Have a Pro code?</div>
+              <div style={{ display:"flex", gap:8 }}>
+                <input style={{ ...inp, flex:1, fontSize:14 }} placeholder="Enter code" value={proCode} onChange={e => setProCode(e.target.value.toUpperCase())} />
+                <button style={{ ...btn(), padding:"12px 20px", fontSize:14 }} onClick={() => {
+                  if (proCode === PRO_CODE) { setIsPro(true); setShowUpgrade(false); setProCode(""); }
+                  else { alert("Invalid code"); }
+                }}>Activate</button>
+              </div>
+            </div>
+            <button style={{ background:"none", border:"none", color:t.sc, fontSize:13, cursor:"pointer", padding:12, width:"100%", marginTop:8 }} onClick={() => setShowUpgrade(false)}>Maybe later</button>
+          </div>
+        </div>
+      )}
+
+      {/* RECURRING EXPENSES MODAL (Pro) */}
+      {showRecurring && (
+        <div style={modBg} onClick={e => e.target === e.currentTarget && setShowRecurring(false)}>
+          <div style={sheet}>
+            <div style={handle} />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <h3 style={{ fontSize:20, fontWeight:700 }}>🔁 Recurring Expenses</h3>
+              <span style={{ cursor:"pointer", fontSize:20, color:t.sc }} onClick={() => setShowRecurring(false)}>✕</span>
+            </div>
+            <p style={{ fontSize:12, color:t.sc, marginBottom:16 }}>Fixed monthly costs deducted from your budget upfront.</p>
+
+            {/* Add new recurring */}
+            <div style={{ padding:16, borderRadius:14, background:t.al, border:"1px solid "+t.bd, marginBottom:16 }}>
+              <input style={{ ...inp, marginBottom:8 }} placeholder="Name (e.g. Rent, Netflix)" value={rName} onChange={e => setRName(e.target.value)} />
+              <div style={{ display:"flex", gap:8, marginBottom:8 }}>
+                <input style={{ ...inp, flex:1 }} type="number" placeholder="Amount" value={rAmt} onChange={e => setRAmt(e.target.value)} />
+                <select style={{ ...inp, width:100, appearance:"auto" }} value={rCat} onChange={e => setRCat(e.target.value)}>
+                  {cats.map(c => <option key={c.name} value={c.name}>{c.emoji} {c.name}</option>)}
+                </select>
+              </div>
+              <button style={{ ...btn(), opacity:rName&&rAmt?1:0.4 }} onClick={() => {
+                if (!rName || !rAmt) return;
+                setRecurring(p => [...p, { id: Date.now(), name: rName, amt: parseFloat(rAmt), cat: rCat }]);
+                setRName(""); setRAmt("");
+              }}>Add Recurring Expense</button>
+            </div>
+
+            {/* List */}
+            {recurring.length === 0 ? (
+              <div style={{ textAlign:"center", padding:24, color:t.sc }}>No recurring expenses yet</div>
+            ) : (
+              <>
+                <div style={{ padding:"10px 14px", borderRadius:10, background:t.ac+"12", marginBottom:12, fontSize:13, color:t.ac, fontWeight:600, textAlign:"center" }}>
+                  Total: {fmtM(recurTotal, bCurr)}/month · Spendable: {fmtM(spendable, bCurr)}
+                </div>
+                {recurring.map(r => (
+                  <div key={r.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 14px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:8 }}>
+                    <div style={{ width:40, height:40, borderRadius:12, background:t.al, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>
+                      {cats.find(c => c.name === r.cat)?.emoji || "💰"}
+                    </div>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontWeight:600, fontSize:14 }}>{r.name}</div>
+                      <div style={{ fontSize:12, color:t.sc }}>{r.cat} · Monthly</div>
+                    </div>
+                    <span style={{ fontWeight:700, fontSize:14 }}>{fmtM(r.amt, bCurr)}</span>
+                    <span style={{ cursor:"pointer", color:t.sc, padding:4 }} onClick={() => setRecurring(p => p.filter(x => x.id !== r.id))}>✕</span>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* CATEGORY BUDGETS MODAL (Pro) */}
+      {showCatBdgt && (
+        <div style={modBg} onClick={e => e.target === e.currentTarget && setShowCatBdgt(false)}>
+          <div style={sheet}>
+            <div style={handle} />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <h3 style={{ fontSize:20, fontWeight:700 }}>🎯 Category Budgets</h3>
+              <span style={{ cursor:"pointer", fontSize:20, color:t.sc }} onClick={() => setShowCatBdgt(false)}>✕</span>
+            </div>
+            <p style={{ fontSize:12, color:t.sc, marginBottom:16 }}>Set spending limits per category. Get alerted when you're close.</p>
+            {cats.map(cat => {
+              const spent = catTotals[cat.name] || 0;
+              const limit = catBudgets[cat.name] || 0;
+              const catPct = limit > 0 ? Math.min((spent / limit) * 100, 100) : 0;
+              return (
+                <div key={cat.name} style={{ padding:14, borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:10 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
+                    <span style={{ fontSize:22 }}>{cat.emoji}</span>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontWeight:600, fontSize:14 }}>{cat.name}</div>
+                      <div style={{ fontSize:12, color:t.sc }}>Spent: {fmtM(spent, bCurr)}{limit > 0 ? (" / "+fmtM(limit, bCurr)) : ""}</div>
+                    </div>
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                    <input style={{ ...inp, flex:1, padding:"10px 12px", fontSize:14 }} type="number" placeholder="Set limit" value={catBudgets[cat.name] || ""} onChange={e => setCatBudgets(p => ({ ...p, [cat.name]: parseFloat(e.target.value) || 0 }))} />
+                    <span style={{ fontSize:12, color:t.sc, minWidth:40 }}>{bCurr}</span>
+                  </div>
+                  {limit > 0 && (
+                    <div style={{ marginTop:8 }}>
+                      <div style={{ width:"100%", height:6, borderRadius:3, background:t.al, overflow:"hidden" }}>
+                        <div style={{ height:"100%", borderRadius:3, width:catPct+"%", background:catPct>85?t.rd:catPct>65?t.wn:t.gn, transition:"width 0.3s" }} />
+                      </div>
+                      <div style={{ fontSize:11, color:catPct>85?t.rd:t.sc, marginTop:4, textAlign:"right" }}>{catPct.toFixed(0)}% used</div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
