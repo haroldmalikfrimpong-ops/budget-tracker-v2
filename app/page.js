@@ -168,6 +168,7 @@ export default function BudgetTrackerV2() {
   const [showAddCat, setShowAddCat] = useState(false);
   const [newCatName, setNewCatName] = useState("");
   const [newCatEmoji, setNewCatEmoji] = useState("📁");
+  const [switchTo, setSwitchTo] = useState(null);
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -538,11 +539,10 @@ export default function BudgetTrackerV2() {
             { id:"business", label:"Business", icon:"💼", unlocked:isBiz },
           ].map(m => (
             <div key={m.id} onClick={() => {
+              if (m.id === activeMode) return;
               if (m.id === "pro" && !isPro) { setShowUpgrade(true); return; }
               if (m.id === "business" && !isBiz) { setShowBizUpgrade(true); return; }
-              setActiveMode(m.id);
-              if (m.id === "business") { setBizMode(true); setCats(DEF_BIZ_CATS); }
-              else { setBizMode(false); setCats(DEF_CATS); }
+              setSwitchTo(m.id);
             }} style={{
               flex:1, padding:"8px 4px", borderRadius:10, textAlign:"center", cursor:"pointer",
               background: activeMode===m.id ? (m.id==="business"?"linear-gradient(135deg,#f5af19,#f093fb)":m.id==="pro"?"linear-gradient(135deg,#6C63FF,#8b7aff)":t.cd) : "transparent",
@@ -1018,6 +1018,33 @@ export default function BudgetTrackerV2() {
           </div>
         </div>
       )}
+      {/* MODE SWITCH CONFIRMATION */}
+      {switchTo && (
+        <div style={{...modBg, alignItems:"center"}} onClick={e => e.target === e.currentTarget && setSwitchTo(null)}>
+          <div style={{ width:"100%", maxWidth:380, background:t.cd, borderRadius:24, padding:28, margin:"auto", animation:"fadeIn 0.2s", textAlign:"center" }}>
+            <div style={{ fontSize:48, marginBottom:12 }}>{switchTo==="personal"?"👤":switchTo==="pro"?"💎":"💼"}</div>
+            <h3 style={{ fontSize:20, fontWeight:700, marginBottom:8 }}>
+              Switch to {switchTo==="personal"?"Personal":switchTo==="pro"?"Pro":"Business"} Mode?
+            </h3>
+            <p style={{ fontSize:13, color:t.sc, lineHeight:1.5, marginBottom:24 }}>
+              {switchTo==="personal" ? "You'll see your personal expenses and categories." :
+               switchTo==="pro" ? "You'll see your personal expenses with Pro features like recurring bills and category limits." :
+               "You'll switch to business categories, invoices, revenue tracking, and P&L dashboard."}
+            </p>
+            <div style={{ display:"flex", gap:10 }}>
+              <button style={{ ...btn(t.al), flex:1, color:t.tx, border:"1px solid "+t.bd }} onClick={() => setSwitchTo(null)}>Cancel</button>
+              <button style={{ ...btn(switchTo==="business"?"#f5af19":t.ac), flex:1, background:switchTo==="business"?"linear-gradient(135deg,#f5af19,#f093fb)":switchTo==="pro"?"linear-gradient(135deg,#6C63FF,#8b7aff)":t.ac }} onClick={() => {
+                setActiveMode(switchTo);
+                if (switchTo === "business") { setBizMode(true); setCats(DEF_BIZ_CATS); }
+                else { setBizMode(false); setCats(DEF_CATS); }
+                setPg("home");
+                setSwitchTo(null);
+              }}>Switch {switchTo==="personal"?"👤":switchTo==="pro"?"💎":"💼"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ADD CUSTOM CATEGORY (Business) */}
       {showAddCat && (
         <div style={modBg} onClick={e => e.target === e.currentTarget && setShowAddCat(false)}>
