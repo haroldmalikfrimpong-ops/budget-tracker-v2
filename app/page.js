@@ -107,6 +107,7 @@ export default function BudgetTrackerV2() {
   const [budget, setBudget] = useState(5000);
   const [uName, setUName] = useState("");
   const [exps, setExps] = useState([]);
+  const [bizExps, setBizExps] = useState([]);
   const [pg, setPg] = useState("home");
   const [warnAt, setWarnAt] = useState(70);
   const [alertAt, setAlertAt] = useState(85);
@@ -180,6 +181,7 @@ export default function BudgetTrackerV2() {
         if (s.budget) setBudget(s.budget);
         if (s.uName) setUName(s.uName);
         if (s.exps) setExps(s.exps);
+        if (s.bizExps) setBizExps(s.bizExps);
         if (s.dk !== undefined) setDk(s.dk);
         if (s.warnAt) setWarnAt(s.warnAt);
         if (s.alertAt) setAlertAt(s.alertAt);
@@ -203,20 +205,24 @@ export default function BudgetTrackerV2() {
     if (!onboarded) return;
     try {
       localStorage.setItem("btv2", JSON.stringify({
-        onboarded, bCurr, cats, budget, uName, exps, dk, warnAt, alertAt, notifOn, dailyRem, alerts, isPro, recurring, catBudgets, bizMode, isBiz, activeMode, invoices, revenue
+        onboarded, bCurr, cats, budget, uName, exps, bizExps, dk, warnAt, alertAt, notifOn, dailyRem, alerts, isPro, recurring, catBudgets, bizMode, isBiz, activeMode, invoices, revenue
       }));
     } catch (e) { console.log("Save error", e); }
-  }, [onboarded, bCurr, cats, budget, uName, exps, dk, warnAt, alertAt, notifOn, dailyRem, alerts, isPro, recurring, catBudgets, bizMode, isBiz, activeMode, invoices, revenue]);
+  }, [onboarded, bCurr, cats, budget, uName, exps, bizExps, dk, warnAt, alertAt, notifOn, dailyRem, alerts, isPro, recurring, catBudgets, bizMode, isBiz, activeMode, invoices, revenue]);
 
   // Theme
   const t = dk
     ? { bg:"#0a0a0f",cd:"#13131a",al:"#1a1a24",bd:"#252530",tx:"#f0f0f5",sc:"#8888a0",ac:"#6C63FF",gl:"rgba(108,99,255,0.15)",rd:"#ff6b6b",gn:"#4ecdc4",wn:"#f5af19",ip:"#1a1a24" }
     : { bg:"#f5f5f8",cd:"#ffffff",al:"#f0f0f5",bd:"#e0e0e8",tx:"#1a1a2e",sc:"#666680",ac:"#6C63FF",gl:"rgba(108,99,255,0.1)",rd:"#ff6b6b",gn:"#4ecdc4",wn:"#f5af19",ip:"#f0f0f5" };
 
+  // Active data based on mode
+  const activeExps = bizMode ? bizExps : exps;
+  const setActiveExps = bizMode ? setBizExps : setExps;
+
   // Computed
   const nw = new Date();
   const cMo = nw.getMonth(), cYr = nw.getFullYear(), cDay = nw.getDate();
-  const moExps = exps.filter(e => { const d = new Date(e.date); return d.getMonth() === cMo && d.getFullYear() === cYr; });
+  const moExps = activeExps.filter(e => { const d = new Date(e.date); return d.getMonth() === cMo && d.getFullYear() === cYr; });
   const totSpent = moExps.reduce((s, e) => s + e.convAmt, 0);
   const remain = budget - totSpent;
   const pct = budget > 0 ? Math.min((totSpent / budget) * 100, 100) : 0;
@@ -266,8 +272,8 @@ export default function BudgetTrackerV2() {
       let desc = transcript.replace(/\d+\.?\d*/, "").replace(foundCat.toLowerCase(), "").trim();
       if (!desc) desc = transcript;
       if (amt > 0) {
-        const newExp = { id: Date.now(), amt, cur: bCurr, convAmt: amt, desc: desc.charAt(0).toUpperCase()+desc.slice(1), category: foundCat, date: new Date().toISOString() };
-        setExps(p => [newExp, ...p]);
+        const newExp = { id: Date.now(), amt, cur: bCurr, convAmt: amt, desc: desc.charAt(0).toUpperCase()+desc.slice(1), category: foundCat, date: new Date().toISOString(), taxDeduct: false };
+        if (bizMode) setBizExps(p => [newExp, ...p]); else setExps(p => [newExp, ...p]);
         setShowAdd(false);
       } else {
         setEDesc(desc);
@@ -295,11 +301,12 @@ export default function BudgetTrackerV2() {
     const a = d.amount || parseFloat(eAmt);
     if (!a || !eCat) return;
     const cur = d.currency || eCurr;
-    setExps(p => [{ id: Date.now(), amt: a, cur, convAmt: cnv(a, cur, bCurr), desc: eDesc || eCat, category: eCat, date: new Date().toISOString(), taxDeduct: bizMode && eIsTax }, ...p]);
+    const newExp = { id: Date.now(), amt: a, cur, convAmt: cnv(a, cur, bCurr), desc: eDesc || eCat, category: eCat, date: new Date().toISOString(), taxDeduct: bizMode && eIsTax };
+    setActiveExps(p => [newExp, ...p]);
     setEAmt(""); setEDesc(""); setECat(""); setEIsTax(false); clrReceipt(); setShowAdd(false);
   };
 
-  const delExp = id => setExps(p => p.filter(e => e.id !== id));
+  const delExp = id => setActiveExps(p => p.filter(e => e.id !== id));
 
   const finishOb = () => {
     const sel = DEF_CATS.filter(c => obCats.includes(c.name));
@@ -341,7 +348,7 @@ export default function BudgetTrackerV2() {
   })();
   const moChartData = (() => {
     const m = {};
-    exps.filter(e => new Date(e.date).getFullYear() === cYr).forEach(e => { const k = MO_NAMES[new Date(e.date).getMonth()]; m[k] = (m[k]||0) + e.convAmt; });
+    activeExps.filter(e => new Date(e.date).getFullYear() === cYr).forEach(e => { const k = MO_NAMES[new Date(e.date).getMonth()]; m[k] = (m[k]||0) + e.convAmt; });
     return Object.entries(m).sort((a, b) => MO_NAMES.indexOf(a[0]) - MO_NAMES.indexOf(b[0]));
   })();
 
@@ -980,7 +987,7 @@ export default function BudgetTrackerV2() {
 
       {/* CONFIRMATION MODAL */}
       {confirmAction && (
-        <div style={modBg} onClick={e => e.target === e.currentTarget && setConfirmAction(null)}>
+        <div style={{...modBg, alignItems:"center"}} onClick={e => e.target === e.currentTarget && setConfirmAction(null)}>
           <div style={{ width:"100%", maxWidth:380, background:t.cd, borderRadius:24, padding:28, margin:"auto", animation:"fadeIn 0.2s", textAlign:"center" }}>
             <div style={{ fontSize:48, marginBottom:16 }}>{confirmAction === "reset" ? "🗑️" : "🔄"}</div>
             <h3 style={{ fontSize:20, fontWeight:700, marginBottom:8 }}>
@@ -988,17 +995,19 @@ export default function BudgetTrackerV2() {
             </h3>
             <p style={{ fontSize:14, color:t.sc, lineHeight:1.5, marginBottom:24 }}>
               {confirmAction === "reset"
-                ? "This will delete all your expenses and alert history. This cannot be undone."
-                : "This will erase everything and take you back to the beginning. All data will be lost."
+                ? ("This will delete all your " + (bizMode ? "business" : "personal") + " expenses" + (bizMode ? ", invoices, and revenue" : "") + ". Your " + (bizMode ? "personal" : "business") + " data will not be affected.")
+                : "This will erase EVERYTHING (personal + business) and take you back to the beginning."
               }
             </p>
             <div style={{ display:"flex", gap:10 }}>
               <button style={{ ...btn(t.al), flex:1, color:t.tx, border:"1px solid "+t.bd }} onClick={() => setConfirmAction(null)}>Cancel</button>
               <button style={{ ...btn(t.rd), flex:1 }} onClick={() => {
                 if (confirmAction === "reset") {
-                  setExps([]); setAlerts([]);
+                  if (bizMode) { setBizExps([]); setInvoices([]); setRevenue([]); }
+                  else { setExps([]); }
+                  setAlerts([]);
                 } else {
-                  setOnboarded(false); setObStep(0); setExps([]); setAlerts([]);
+                  setOnboarded(false); setObStep(0); setExps([]); setBizExps([]); setAlerts([]); setInvoices([]); setRevenue([]); setRecurring([]); setCatBudgets({}); setIsPro(false); setIsBiz(false); setActiveMode("personal"); setBizMode(false);
                   localStorage.removeItem("btv2");
                 }
                 setConfirmAction(null);
@@ -1195,7 +1204,7 @@ export default function BudgetTrackerV2() {
 
       {/* UPGRADE MODAL */}
       {showUpgrade && (
-        <div style={modBg} onClick={e => e.target === e.currentTarget && setShowUpgrade(false)}>
+        <div style={{...modBg, alignItems:"center"}} onClick={e => e.target === e.currentTarget && setShowUpgrade(false)}>
           <div style={{ width:"100%", maxWidth:400, background:t.cd, borderRadius:24, padding:28, margin:"auto", animation:"fadeIn 0.2s" }}>
             <div style={{ textAlign:"center" }}>
               <div style={{ fontSize:48, marginBottom:8 }}>💎</div>
@@ -1224,7 +1233,7 @@ export default function BudgetTrackerV2() {
 
       {/* BUSINESS UPGRADE MODAL */}
       {showBizUpgrade && (
-        <div style={modBg} onClick={e => e.target === e.currentTarget && setShowBizUpgrade(false)}>
+        <div style={{...modBg, alignItems:"center"}} onClick={e => e.target === e.currentTarget && setShowBizUpgrade(false)}>
           <div style={{ width:"100%", maxWidth:400, background:t.cd, borderRadius:24, padding:28, margin:"auto", animation:"fadeIn 0.2s" }}>
             <div style={{ textAlign:"center" }}>
               <div style={{ fontSize:48, marginBottom:8 }}>💼</div>
