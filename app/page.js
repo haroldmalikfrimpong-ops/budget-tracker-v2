@@ -124,7 +124,9 @@ export default function BudgetTrackerV2() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPass, setAuthPass] = useState("");
   const [authErr, setAuthErr] = useState("");
+  const [showLogin, setShowLogin] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [isGuest, setIsGuest] = useState(false);
   const saveTimer = useRef(null);
 
   const [dk, setDk] = useState(true);
@@ -232,54 +234,71 @@ export default function BudgetTrackerV2() {
     notifOn, dailyRem, alerts, isPro, recurring, catBudgets, bizMode, isBiz,
     activeMode, invoices, revenue, archive]);
 
-  // Auth state listener
+  // Step 1: ALWAYS load localStorage first
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("btv2");
+      if (raw) loadData(JSON.parse(raw));
+    } catch (e) { console.log("Local load error", e); }
+  }, []);
+
+  // Step 2: Auth listener — sync with cloud when signed in
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setUser(u);
       if (u) {
-        // Load from Firestore
+        setIsGuest(false);
         try {
           const snap = await getDoc(doc(db, "users", u.uid));
           if (snap.exists()) {
-            loadData(snap.data());
-          } else {
-            // First login — migrate localStorage if exists
+            const cloud = snap.data();
+            // If user had local data (guest usage), merge it — local wins for first sign-in
             const raw = localStorage.getItem("btv2");
             if (raw) {
-              const s = JSON.parse(raw);
-              loadData(s);
-              await setDoc(doc(db, "users", u.uid), { ...s, lastSaved: new Date().toISOString() });
+              const localData = JSON.parse(raw);
+              if (localData.onboarded && (!cloud.lastSaved || localData.exps?.length > 0)) {
+                // User has local data — push it to cloud to preserve it
+                await setDoc(doc(db, "users", u.uid), { ...localData, lastSaved: new Date().toISOString() });
+              } else if (cloud.onboarded) {
+                // Cloud has data, local doesn't — load cloud
+                loadData(cloud);
+              }
+            } else if (cloud.onboarded) {
+              // No local data, load cloud
+              loadData(cloud);
+            }
+          } else {
+            // Brand new cloud user — upload whatever local data exists
+            const raw = localStorage.getItem("btv2");
+            if (raw) {
+              const localData = JSON.parse(raw);
+              if (localData.onboarded) {
+                await setDoc(doc(db, "users", u.uid), { ...localData, lastSaved: new Date().toISOString() });
+              }
             }
           }
-        } catch (e) {
-          console.log("Firestore load error, falling back to localStorage", e);
-          const raw = localStorage.getItem("btv2");
-          if (raw) loadData(JSON.parse(raw));
-        }
+        } catch (e) { console.log("Cloud sync error", e); }
       }
       setAuthLoading(false);
     });
     return () => unsub();
   }, []);
 
-  // Debounced save to Firestore + localStorage backup
+  // Save: localStorage always + Firestore if signed in
   useEffect(() => {
-    if (!onboarded || !user) return;
+    if (!onboarded) return;
     const data = getDataObj();
-    // Always save to localStorage immediately (offline backup)
     try { localStorage.setItem("btv2", JSON.stringify(data)); } catch (e) {}
-    // Debounced Firestore save (1.5s after last change)
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
-      try {
-        setSaving(true);
-        await setDoc(doc(db, "users", user.uid), data);
-        setSaving(false);
-      } catch (e) {
-        console.log("Cloud save error", e);
-        setSaving(false);
-      }
-    }, 1500);
+    if (user) {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(async () => {
+        try {
+          setSaving(true);
+          await setDoc(doc(db, "users", user.uid), data);
+          setSaving(false);
+        } catch (e) { console.log("Cloud save error", e); setSaving(false); }
+      }, 1500);
+    }
   }, [onboarded, bCurr, cats, budget, uName, exps, bizExps, dk, warnAt, alertAt,
     notifOn, dailyRem, alerts, isPro, recurring, catBudgets, bizMode, isBiz,
     activeMode, invoices, revenue, archive, user, getDataObj]);
@@ -290,7 +309,6 @@ export default function BudgetTrackerV2() {
     const now = new Date();
     const lastExp = exps.length > 0 ? new Date(exps[0].date) : null;
     if (lastExp && (lastExp.getMonth() !== now.getMonth() || lastExp.getFullYear() !== now.getFullYear())) {
-      // There are expenses from a previous month — archive them
       const prevMonth = lastExp.getMonth();
       const prevYear = lastExp.getFullYear();
       const oldExps = exps.filter(e => { const d = new Date(e.date); return d.getMonth() === prevMonth && d.getFullYear() === prevYear; });
@@ -318,9 +336,13 @@ export default function BudgetTrackerV2() {
   const doGoogle = async () => {
     setAuthErr("");
     try { await signInWithPopup(auth, gProv); }
-    catch (e) { if (e.code !== "auth/popup-closed-by-user") setAuthErr("Google sign-in failed"); }
+    catch (e) {
+      if (e.code === "auth/popup-closed-by-user") return;
+      if (e.code === "auth/unauthorized-domain") setAuthErr("Add your domain in Firebase Console → Authentication → Settings → Authorized domains");
+      else setAuthErr("Google sign-in failed. Try email instead.");
+    }
   };
-  const doLogout = async () => { await signOut(auth); setOnboarded(false); };
+  const doLogout = async () => { await signOut(auth); setIsGuest(false); };
 
   // Theme
   const t = dk
@@ -559,8 +581,8 @@ export default function BudgetTrackerV2() {
     );
   }
 
-  // ===================== LOGIN =====================
-  if (!user) {
+  // ===================== LOGIN SCREEN =====================
+  if (!user && !isGuest) {
     const lbg = { minHeight:"100vh", background:"#0a0a0f", color:"#f0f0f5", fontFamily:"'DM Sans',sans-serif", maxWidth:480, margin:"0 auto", display:"flex", flexDirection:"column", justifyContent:"center", padding:24 };
     return (
       <div style={lbg}>
@@ -602,6 +624,13 @@ export default function BudgetTrackerV2() {
             <span style={{ fontSize:13, color:"#6C63FF", cursor:"pointer", fontWeight:600 }} onClick={() => { setAuthPg(authPg === "login" ? "signup" : "login"); setAuthErr(""); }}>
               {authPg === "login" ? "Sign Up" : "Sign In"}
             </span>
+          </div>
+
+          <div style={{ textAlign:"center", marginTop:24, paddingTop:20, borderTop:"1px solid #252530" }}>
+            <button onClick={() => setIsGuest(true)} style={{ background:"none", border:"none", color:"#8888a0", fontSize:14, cursor:"pointer", padding:10 }}>
+              Continue as Guest →
+            </button>
+            <div style={{ fontSize:11, color:"#555", marginTop:6 }}>⚠️ Guest data is stored on this device only and may be lost</div>
           </div>
         </div>
       </div>
@@ -701,7 +730,8 @@ export default function BudgetTrackerV2() {
             <div style={{ fontSize:20, fontWeight:700 }}>{uName} 👋</div>
           </div>
           <button onClick={() => setDk(!dk)} style={{ background:t.al, border:"1px solid "+t.bd, borderRadius:12, padding:"8px 12px", color:t.tx, cursor:"pointer", fontSize:16 }}>{dk ? "☀️" : "🌙"}</button>
-          {saving && <div style={{ fontSize:10, color:t.ac, position:"absolute", right:20, top:44 }}>☁️ Saving...</div>}
+          {user && saving && <div style={{ fontSize:10, color:t.ac, position:"absolute", right:20, top:44 }}>☁️ Syncing...</div>}
+          {user && !saving && <div style={{ fontSize:10, color:t.gn, position:"absolute", right:20, top:44 }}>☁️</div>}
         </div>
         {/* Mode Switcher */}
         <div style={{ display:"flex", gap:6, padding:4, borderRadius:14, background:t.al, border:"1px solid "+t.bd }}>
@@ -996,15 +1026,25 @@ export default function BudgetTrackerV2() {
               <button onClick={() => setDk(false)} style={{ ...btn(!dk?t.ac:t.al), flex:1, color:!dk?"#fff":t.tx, border:"1px solid "+(!dk?t.ac:t.bd) }}>☀️ Light</button>
             </div>
 
-            <div style={{ padding:"14px 16px", borderRadius:14, background:t.ac+"12", border:"1px solid "+t.ac+"30", marginBottom:20 }}>
-              <div style={{ fontSize:13, fontWeight:600, color:t.ac, marginBottom:4 }}>☁️ Cloud Sync Active</div>
-              <div style={{ fontSize:12, color:t.sc, lineHeight:1.5 }}>Your data is saved to the cloud and syncs across devices. Signed in as {user?.email || "Google account"}.</div>
+            <div style={{ padding:"14px 16px", borderRadius:14, background:user?t.ac+"12":"#f5af1912", border:"1px solid "+(user?t.ac:"#f5af19")+"30", marginBottom:20 }}>
+              {user ? (
+                <>
+                  <div style={{ fontSize:13, fontWeight:600, color:t.ac, marginBottom:4 }}>☁️ Cloud Sync Active</div>
+                  <div style={{ fontSize:12, color:t.sc, lineHeight:1.5 }}>Signed in as {user.email}. Data syncs across all your devices automatically.</div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize:13, fontWeight:600, color:"#f5af19", marginBottom:4 }}>⚠️ Guest Mode — Data at risk</div>
+                  <div style={{ fontSize:12, color:t.sc, lineHeight:1.5, marginBottom:10 }}>Your data is only saved on this device. Clearing browser data or switching devices will erase it.</div>
+                  <button style={{ ...btn(), fontSize:13, padding:"10px 16px" }} onClick={() => setShowLogin(true)}>☁️ Sign In to Save Your Data</button>
+                </>
+              )}
             </div>
 
             <div style={{ fontSize:14, fontWeight:600, color:t.rd, marginBottom:10, textTransform:"uppercase", letterSpacing:1 }}>Danger Zone</div>
             <button style={{ ...btn(t.rd), marginBottom:10 }} onClick={() => setConfirmAction("reset")}>🗑️ Reset All Data</button>
             <button style={{ ...btn(t.al), color:t.tx, border:"1px solid "+t.bd, marginBottom:10 }} onClick={() => setConfirmAction("fresh")}>🔄 Start Fresh</button>
-            <button style={{ ...btn(t.al), color:t.sc, border:"1px solid "+t.bd }} onClick={doLogout}>🚪 Sign Out</button>
+            {user && <button style={{ ...btn(t.al), color:t.sc, border:"1px solid "+t.bd }} onClick={doLogout}>🚪 Sign Out</button>}
           </div>
         </div>
       )}
@@ -1192,6 +1232,37 @@ export default function BudgetTrackerV2() {
           </div>
         </div>
       )}
+      {/* SIGN IN MODAL */}
+      {showLogin && (
+        <div style={{...modBg, alignItems:"center"}} onClick={e => e.target === e.currentTarget && setShowLogin(false)}>
+          <div style={{ width:"100%", maxWidth:400, background:t.cd, borderRadius:24, padding:28, margin:"auto", animation:"fadeIn 0.2s" }}>
+            <div style={{ textAlign:"center", marginBottom:20 }}>
+              <div style={{ fontSize:40, marginBottom:8 }}>☁️</div>
+              <h3 style={{ fontSize:20, fontWeight:700 }}>{authPg === "login" ? "Sign In" : "Create Account"}</h3>
+              <p style={{ fontSize:12, color:t.sc }}>Sync your data across all devices</p>
+            </div>
+            {authErr && <div style={{ padding:"10px 14px", borderRadius:10, background:t.rd+"15", border:"1px solid "+t.rd+"30", marginBottom:12, fontSize:12, color:t.rd, textAlign:"center" }}>{authErr}</div>}
+            <input style={{ ...inp, marginBottom:10 }} placeholder="Email" type="email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} />
+            <input style={{ ...inp, marginBottom:14 }} placeholder="Password" type="password" value={authPass} onChange={e => setAuthPass(e.target.value)} onKeyDown={e => { if (e.key === "Enter") { authPg === "login" ? doLogin() : doSignup(); }}} />
+            <button style={{ ...btn(), marginBottom:10 }} onClick={async () => {
+              if (authPg === "login") await doLogin(); else await doSignup();
+              if (auth.currentUser) { setShowLogin(false); setAuthEmail(""); setAuthPass(""); }
+            }}>{authPg === "login" ? "Sign In" : "Create Account"}</button>
+            <div style={{ display:"flex", alignItems:"center", gap:12, margin:"6px 0 14px" }}>
+              <div style={{ flex:1, height:1, background:t.bd }} /><span style={{ fontSize:11, color:t.sc }}>or</span><div style={{ flex:1, height:1, background:t.bd }} />
+            </div>
+            <button onClick={async () => { await doGoogle(); if (auth.currentUser) { setShowLogin(false); } }} style={{ width:"100%", padding:"12px 16px", borderRadius:14, background:t.al, border:"1px solid "+t.bd, color:t.tx, fontSize:14, fontWeight:600, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+              <span style={{ fontSize:16 }}>G</span> Continue with Google
+            </button>
+            <div style={{ textAlign:"center", marginTop:14 }}>
+              <span style={{ fontSize:12, color:t.sc }}>{authPg === "login" ? "No account? " : "Have an account? "}</span>
+              <span style={{ fontSize:12, color:t.ac, cursor:"pointer", fontWeight:600 }} onClick={() => { setAuthPg(authPg === "login" ? "signup" : "login"); setAuthErr(""); }}>{authPg === "login" ? "Sign Up" : "Sign In"}</span>
+            </div>
+            <button style={{ background:"none", border:"none", color:t.sc, fontSize:12, cursor:"pointer", padding:10, width:"100%", marginTop:4 }} onClick={() => { setShowLogin(false); setAuthErr(""); }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
       {/* MODE SWITCH CONFIRMATION */}
       {switchTo && (
         <div style={{...modBg, alignItems:"center"}} onClick={e => e.target === e.currentTarget && setSwitchTo(null)}>
