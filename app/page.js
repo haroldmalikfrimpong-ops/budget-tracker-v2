@@ -1,5 +1,22 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { initializeApp } from "firebase/app";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, signOut } from "firebase/auth";
+import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDJES8JzYNOe9MNoZY6t-5aKGp5lAawjRo",
+  authDomain: "yourbudgettracker-82d91.firebaseapp.com",
+  projectId: "yourbudgettracker-82d91",
+  storageBucket: "yourbudgettracker-82d91.firebasestorage.app",
+  messagingSenderId: "389883134721",
+  appId: "1:389883134721:web:c2f97ff4271974dfcad100"
+};
+
+const fbApp = initializeApp(firebaseConfig);
+const auth = getAuth(fbApp);
+const db = getFirestore(fbApp);
+const gProv = new GoogleAuthProvider();
 
 const CURRENCIES = [
   { code: "USD", symbol: "$", name: "US Dollar" },
@@ -100,6 +117,16 @@ function detectCurrency(input) {
 }
 
 export default function BudgetTrackerV2() {
+  // Auth
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authPg, setAuthPg] = useState("login"); // login | signup
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPass, setAuthPass] = useState("");
+  const [authErr, setAuthErr] = useState("");
+  const [saving, setSaving] = useState(false);
+  const saveTimer = useRef(null);
+
   const [dk, setDk] = useState(true);
   const [onboarded, setOnboarded] = useState(false);
   const [bCurr, setBCurr] = useState("USD");
@@ -169,47 +196,131 @@ export default function BudgetTrackerV2() {
   const [newCatName, setNewCatName] = useState("");
   const [newCatEmoji, setNewCatEmoji] = useState("📁");
   const [switchTo, setSwitchTo] = useState(null);
+  const [archive, setArchive] = useState([]);
 
-  // Load from localStorage on mount
+  // ===== FIREBASE AUTH + DATA =====
+  const loadData = (s) => {
+    if (s.onboarded) setOnboarded(true);
+    if (s.bCurr) { setBCurr(s.bCurr); setECurr(s.bCurr); }
+    if (s.cats) setCats(s.cats);
+    if (s.budget) setBudget(s.budget);
+    if (s.uName) setUName(s.uName);
+    if (s.exps) setExps(s.exps);
+    if (s.bizExps) setBizExps(s.bizExps);
+    if (s.dk !== undefined) setDk(s.dk);
+    if (s.warnAt) setWarnAt(s.warnAt);
+    if (s.alertAt) setAlertAt(s.alertAt);
+    if (s.notifOn) setNotifOn(s.notifOn);
+    if (s.dailyRem) setDailyRem(s.dailyRem);
+    if (s.alerts) setAlerts(s.alerts);
+    if (s.isPro) setIsPro(true);
+    if (s.recurring) setRecurring(s.recurring);
+    if (s.catBudgets) setCatBudgets(s.catBudgets);
+    if (s.bizMode) setBizMode(s.bizMode);
+    if (s.isBiz) setIsBiz(true);
+    if (s.activeMode) setActiveMode(s.activeMode);
+    if (s.invoices) setInvoices(s.invoices);
+    if (s.revenue) setRevenue(s.revenue);
+    if (s.archive) setArchive(s.archive);
+  };
+
+  const getDataObj = useCallback(() => ({
+    onboarded, bCurr, cats, budget, uName, exps, bizExps, dk, warnAt, alertAt,
+    notifOn, dailyRem, alerts, isPro, recurring, catBudgets, bizMode, isBiz,
+    activeMode, invoices, revenue, archive, lastSaved: new Date().toISOString()
+  }), [onboarded, bCurr, cats, budget, uName, exps, bizExps, dk, warnAt, alertAt,
+    notifOn, dailyRem, alerts, isPro, recurring, catBudgets, bizMode, isBiz,
+    activeMode, invoices, revenue, archive]);
+
+  // Auth state listener
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("btv2");
-      if (raw) {
-        const s = JSON.parse(raw);
-        if (s.onboarded) setOnboarded(true);
-        if (s.bCurr) { setBCurr(s.bCurr); setECurr(s.bCurr); }
-        if (s.cats) setCats(s.cats);
-        if (s.budget) setBudget(s.budget);
-        if (s.uName) setUName(s.uName);
-        if (s.exps) setExps(s.exps);
-        if (s.bizExps) setBizExps(s.bizExps);
-        if (s.dk !== undefined) setDk(s.dk);
-        if (s.warnAt) setWarnAt(s.warnAt);
-        if (s.alertAt) setAlertAt(s.alertAt);
-        if (s.notifOn) setNotifOn(s.notifOn);
-        if (s.dailyRem) setDailyRem(s.dailyRem);
-        if (s.alerts) setAlerts(s.alerts);
-        if (s.isPro) setIsPro(true);
-        if (s.recurring) setRecurring(s.recurring);
-        if (s.catBudgets) setCatBudgets(s.catBudgets);
-        if (s.bizMode) setBizMode(s.bizMode);
-        if (s.isBiz) setIsBiz(true);
-        if (s.activeMode) setActiveMode(s.activeMode);
-        if (s.invoices) setInvoices(s.invoices);
-        if (s.revenue) setRevenue(s.revenue);
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      setUser(u);
+      if (u) {
+        // Load from Firestore
+        try {
+          const snap = await getDoc(doc(db, "users", u.uid));
+          if (snap.exists()) {
+            loadData(snap.data());
+          } else {
+            // First login — migrate localStorage if exists
+            const raw = localStorage.getItem("btv2");
+            if (raw) {
+              const s = JSON.parse(raw);
+              loadData(s);
+              await setDoc(doc(db, "users", u.uid), { ...s, lastSaved: new Date().toISOString() });
+            }
+          }
+        } catch (e) {
+          console.log("Firestore load error, falling back to localStorage", e);
+          const raw = localStorage.getItem("btv2");
+          if (raw) loadData(JSON.parse(raw));
+        }
       }
-    } catch (e) { console.log("Load error", e); }
+      setAuthLoading(false);
+    });
+    return () => unsub();
   }, []);
 
-  // Save to localStorage on every change
+  // Debounced save to Firestore + localStorage backup
   useEffect(() => {
-    if (!onboarded) return;
-    try {
-      localStorage.setItem("btv2", JSON.stringify({
-        onboarded, bCurr, cats, budget, uName, exps, bizExps, dk, warnAt, alertAt, notifOn, dailyRem, alerts, isPro, recurring, catBudgets, bizMode, isBiz, activeMode, invoices, revenue
-      }));
-    } catch (e) { console.log("Save error", e); }
-  }, [onboarded, bCurr, cats, budget, uName, exps, bizExps, dk, warnAt, alertAt, notifOn, dailyRem, alerts, isPro, recurring, catBudgets, bizMode, isBiz, activeMode, invoices, revenue]);
+    if (!onboarded || !user) return;
+    const data = getDataObj();
+    // Always save to localStorage immediately (offline backup)
+    try { localStorage.setItem("btv2", JSON.stringify(data)); } catch (e) {}
+    // Debounced Firestore save (1.5s after last change)
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      try {
+        setSaving(true);
+        await setDoc(doc(db, "users", user.uid), data);
+        setSaving(false);
+      } catch (e) {
+        console.log("Cloud save error", e);
+        setSaving(false);
+      }
+    }, 1500);
+  }, [onboarded, bCurr, cats, budget, uName, exps, bizExps, dk, warnAt, alertAt,
+    notifOn, dailyRem, alerts, isPro, recurring, catBudgets, bizMode, isBiz,
+    activeMode, invoices, revenue, archive, user, getDataObj]);
+
+  // Monthly archive check
+  useEffect(() => {
+    if (!onboarded || exps.length === 0) return;
+    const now = new Date();
+    const lastExp = exps.length > 0 ? new Date(exps[0].date) : null;
+    if (lastExp && (lastExp.getMonth() !== now.getMonth() || lastExp.getFullYear() !== now.getFullYear())) {
+      // There are expenses from a previous month — archive them
+      const prevMonth = lastExp.getMonth();
+      const prevYear = lastExp.getFullYear();
+      const oldExps = exps.filter(e => { const d = new Date(e.date); return d.getMonth() === prevMonth && d.getFullYear() === prevYear; });
+      const curExps = exps.filter(e => { const d = new Date(e.date); return !(d.getMonth() === prevMonth && d.getFullYear() === prevYear); });
+      if (oldExps.length > 0) {
+        const key = MO_NAMES[prevMonth] + " " + prevYear;
+        setArchive(p => [...p.filter(a => a.key !== key), { key, month: prevMonth, year: prevYear, exps: oldExps, total: oldExps.reduce((s,e) => s + e.convAmt, 0) }]);
+        setExps(curExps);
+      }
+    }
+  }, [onboarded, exps]);
+
+  // Auth functions
+  const doLogin = async () => {
+    setAuthErr("");
+    try { await signInWithEmailAndPassword(auth, authEmail, authPass); }
+    catch (e) { setAuthErr(e.code === "auth/invalid-credential" ? "Wrong email or password" : e.code === "auth/user-not-found" ? "No account found" : "Login failed. Check your details."); }
+  };
+  const doSignup = async () => {
+    setAuthErr("");
+    if (authPass.length < 6) { setAuthErr("Password must be at least 6 characters"); return; }
+    try { await createUserWithEmailAndPassword(auth, authEmail, authPass); }
+    catch (e) { setAuthErr(e.code === "auth/email-already-in-use" ? "Email already in use" : "Signup failed. Try again."); }
+  };
+  const doGoogle = async () => {
+    setAuthErr("");
+    try { await signInWithPopup(auth, gProv); }
+    catch (e) { if (e.code !== "auth/popup-closed-by-user") setAuthErr("Google sign-in failed"); }
+  };
+  const doLogout = async () => { await signOut(auth); setOnboarded(false); };
 
   // Theme
   const t = dk
@@ -437,6 +548,66 @@ export default function BudgetTrackerV2() {
 
   const css = "@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0}@keyframes fadeIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}@keyframes spin{to{transform:rotate(360deg)}}input:focus,select:focus{border-color:#6C63FF!important;outline:none}::-webkit-scrollbar{width:0}input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}input[type=number]{-moz-appearance:textfield}input[type=range]{-webkit-appearance:auto;appearance:auto;background:transparent;border:none;padding:0}";
 
+  // ===================== LOADING =====================
+  if (authLoading) {
+    return (
+      <div style={{ minHeight:"100vh", background:"#0a0a0f", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", fontFamily:"'DM Sans',sans-serif" }}>
+        <style>{css}</style>
+        <div style={{ fontSize:64, marginBottom:16, animation:"pulse 1.5s infinite" }}>💰</div>
+        <div style={{ color:"#f0f0f5", fontSize:18, fontWeight:600 }}>Loading...</div>
+      </div>
+    );
+  }
+
+  // ===================== LOGIN =====================
+  if (!user) {
+    const lbg = { minHeight:"100vh", background:"#0a0a0f", color:"#f0f0f5", fontFamily:"'DM Sans',sans-serif", maxWidth:480, margin:"0 auto", display:"flex", flexDirection:"column", justifyContent:"center", padding:24 };
+    return (
+      <div style={lbg}>
+        <style>{css}</style>
+        <div style={{ textAlign:"center", marginBottom:32, animation:"fadeIn 0.5s" }}>
+          <div style={{ fontSize:64, marginBottom:16 }}>💰</div>
+          <h1 style={{ fontSize:28, fontWeight:700, marginBottom:4 }}>Your Budget Tracker</h1>
+          <p style={{ color:"#8888a0" }}>Smart. Simple. Secure.</p>
+        </div>
+
+        <div style={{ animation:"fadeIn 0.5s" }}>
+          {authErr && (
+            <div style={{ padding:"12px 16px", borderRadius:12, background:"#ff6b6b15", border:"1px solid #ff6b6b40", marginBottom:16, fontSize:13, color:"#ff6b6b", textAlign:"center" }}>{authErr}</div>
+          )}
+
+          <input style={inp} placeholder="Email" type="email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} />
+          <div style={{ height:10 }} />
+          <input style={inp} placeholder="Password" type="password" value={authPass} onChange={e => setAuthPass(e.target.value)} onKeyDown={e => e.key === "Enter" && (authPg === "login" ? doLogin() : doSignup())} />
+
+          <button style={{ ...btn(), marginTop:16 }} onClick={authPg === "login" ? doLogin : doSignup}>
+            {authPg === "login" ? "Sign In" : "Create Account"}
+          </button>
+
+          <div style={{ display:"flex", alignItems:"center", gap:12, margin:"20px 0" }}>
+            <div style={{ flex:1, height:1, background:"#252530" }} />
+            <span style={{ fontSize:12, color:"#8888a0" }}>or</span>
+            <div style={{ flex:1, height:1, background:"#252530" }} />
+          </div>
+
+          <button onClick={doGoogle} style={{ width:"100%", padding:"14px 20px", borderRadius:14, background:"#13131a", border:"1px solid #252530", color:"#f0f0f5", fontSize:15, fontWeight:600, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}>
+            <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+            Continue with Google
+          </button>
+
+          <div style={{ textAlign:"center", marginTop:20 }}>
+            <span style={{ fontSize:13, color:"#8888a0" }}>
+              {authPg === "login" ? "Don't have an account? " : "Already have an account? "}
+            </span>
+            <span style={{ fontSize:13, color:"#6C63FF", cursor:"pointer", fontWeight:600 }} onClick={() => { setAuthPg(authPg === "login" ? "signup" : "login"); setAuthErr(""); }}>
+              {authPg === "login" ? "Sign Up" : "Sign In"}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ===================== ONBOARDING =====================
   if (!onboarded) {
     const wrap = { minHeight:"100vh", background:t.bg, color:t.tx, fontFamily:"'DM Sans',sans-serif", maxWidth:480, margin:"0 auto", display:"flex", flexDirection:"column", justifyContent:"center", padding:24 };
@@ -530,6 +701,7 @@ export default function BudgetTrackerV2() {
             <div style={{ fontSize:20, fontWeight:700 }}>{uName} 👋</div>
           </div>
           <button onClick={() => setDk(!dk)} style={{ background:t.al, border:"1px solid "+t.bd, borderRadius:12, padding:"8px 12px", color:t.tx, cursor:"pointer", fontSize:16 }}>{dk ? "☀️" : "🌙"}</button>
+          {saving && <div style={{ fontSize:10, color:t.ac, position:"absolute", right:20, top:44 }}>☁️ Saving...</div>}
         </div>
         {/* Mode Switcher */}
         <div style={{ display:"flex", gap:6, padding:4, borderRadius:14, background:t.al, border:"1px solid "+t.bd }}>
@@ -825,13 +997,14 @@ export default function BudgetTrackerV2() {
             </div>
 
             <div style={{ padding:"14px 16px", borderRadius:14, background:t.ac+"12", border:"1px solid "+t.ac+"30", marginBottom:20 }}>
-              <div style={{ fontSize:13, fontWeight:600, color:t.ac, marginBottom:4 }}>📱 Data stored on this device</div>
-              <div style={{ fontSize:12, color:t.sc, lineHeight:1.5 }}>Your data is saved locally on this device. Clearing browser data will erase it. Cloud sync coming soon!</div>
+              <div style={{ fontSize:13, fontWeight:600, color:t.ac, marginBottom:4 }}>☁️ Cloud Sync Active</div>
+              <div style={{ fontSize:12, color:t.sc, lineHeight:1.5 }}>Your data is saved to the cloud and syncs across devices. Signed in as {user?.email || "Google account"}.</div>
             </div>
 
             <div style={{ fontSize:14, fontWeight:600, color:t.rd, marginBottom:10, textTransform:"uppercase", letterSpacing:1 }}>Danger Zone</div>
             <button style={{ ...btn(t.rd), marginBottom:10 }} onClick={() => setConfirmAction("reset")}>🗑️ Reset All Data</button>
-            <button style={{ ...btn(t.al), color:t.tx, border:"1px solid "+t.bd }} onClick={() => setConfirmAction("fresh")}>🔄 Start Fresh</button>
+            <button style={{ ...btn(t.al), color:t.tx, border:"1px solid "+t.bd, marginBottom:10 }} onClick={() => setConfirmAction("fresh")}>🔄 Start Fresh</button>
+            <button style={{ ...btn(t.al), color:t.sc, border:"1px solid "+t.bd }} onClick={doLogout}>🚪 Sign Out</button>
           </div>
         </div>
       )}
@@ -1001,14 +1174,15 @@ export default function BudgetTrackerV2() {
             </p>
             <div style={{ display:"flex", gap:10 }}>
               <button style={{ ...btn(t.al), flex:1, color:t.tx, border:"1px solid "+t.bd }} onClick={() => setConfirmAction(null)}>Cancel</button>
-              <button style={{ ...btn(t.rd), flex:1 }} onClick={() => {
+              <button style={{ ...btn(t.rd), flex:1 }} onClick={async () => {
                 if (confirmAction === "reset") {
                   if (bizMode) { setBizExps([]); setInvoices([]); setRevenue([]); }
                   else { setExps([]); }
                   setAlerts([]);
                 } else {
-                  setOnboarded(false); setObStep(0); setExps([]); setBizExps([]); setAlerts([]); setInvoices([]); setRevenue([]); setRecurring([]); setCatBudgets({}); setIsPro(false); setIsBiz(false); setActiveMode("personal"); setBizMode(false);
+                  setOnboarded(false); setObStep(0); setExps([]); setBizExps([]); setAlerts([]); setInvoices([]); setRevenue([]); setRecurring([]); setCatBudgets({}); setIsPro(false); setIsBiz(false); setActiveMode("personal"); setBizMode(false); setArchive([]);
                   localStorage.removeItem("btv2");
+                  if (user) try { await setDoc(doc(db, "users", user.uid), { cleared: true }); } catch(e) {}
                 }
                 setConfirmAction(null);
               }}>
