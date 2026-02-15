@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { initializeApp } from "firebase/app";
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, signOut } from "firebase/auth";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithRedirect, GoogleAuthProvider, signOut } from "firebase/auth";
 import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -199,6 +199,7 @@ export default function BudgetTrackerV2() {
   const [newCatEmoji, setNewCatEmoji] = useState("📁");
   const [switchTo, setSwitchTo] = useState(null);
   const [archive, setArchive] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
 
   // ===== FIREBASE AUTH + DATA =====
   const loadData = (s) => {
@@ -335,12 +336,8 @@ export default function BudgetTrackerV2() {
   };
   const doGoogle = async () => {
     setAuthErr("");
-    try { await signInWithPopup(auth, gProv); }
-    catch (e) {
-      if (e.code === "auth/popup-closed-by-user") return;
-      if (e.code === "auth/unauthorized-domain") setAuthErr("Add your domain in Firebase Console → Authentication → Settings → Authorized domains");
-      else setAuthErr("Google sign-in failed. Try email instead.");
-    }
+    try { await signInWithRedirect(auth, gProv); }
+    catch (e) { setAuthErr("Google sign-in failed. Try email instead."); }
   };
   const doLogout = async () => { await signOut(auth); setIsGuest(false); };
 
@@ -868,7 +865,10 @@ export default function BudgetTrackerV2() {
       {/* ========== STATS ========== */}
       {pg === "stats" && (
         <div style={{ animation:"fadeIn 0.3s", paddingBottom:90 }}>
-          <div style={{ padding:"8px 20px 0" }}><h2 style={{ fontSize:22, fontWeight:700, marginBottom:16 }}>Stats</h2></div>
+          <div style={{ padding:"8px 20px 0", display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+            <h2 style={{ fontSize:22, fontWeight:700 }}>Stats</h2>
+            {archive.length > 0 && <span style={{ fontSize:13, color:t.ac, cursor:"pointer" }} onClick={() => setShowHistory(true)}>📅 History</span>}
+          </div>
           <div style={{ display:"flex", gap:12, padding:"0 20px", marginBottom:16 }}>
             <div style={{ ...crd, flex:1, textAlign:"center" }}><div style={{ fontSize:11, color:t.sc }}>TOTAL SPENT</div><div style={{ fontSize:22, fontWeight:700, color:t.rd, marginTop:4 }}>{fmtM(totSpent,bCurr)}</div></div>
             <div style={{ ...crd, flex:1, textAlign:"center" }}><div style={{ fontSize:11, color:t.sc }}>REMAINING</div><div style={{ fontSize:22, fontWeight:700, color:remain>=0?t.gn:t.rd, marginTop:4 }}>{fmtM(remain,bCurr)}</div></div>
@@ -1232,6 +1232,41 @@ export default function BudgetTrackerV2() {
           </div>
         </div>
       )}
+      {/* MONTH HISTORY */}
+      {showHistory && (
+        <div style={modBg} onClick={e => e.target === e.currentTarget && setShowHistory(false)}>
+          <div style={sheet}>
+            <div style={handle} />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <h3 style={{ fontSize:20, fontWeight:700 }}>📅 Past Months</h3>
+              <span style={{ cursor:"pointer", fontSize:20, color:t.sc }} onClick={() => setShowHistory(false)}>✕</span>
+            </div>
+            {archive.length === 0 ? (
+              <div style={{ textAlign:"center", padding:32, color:t.sc }}>No archived months yet. Past months appear here automatically.</div>
+            ) : archive.sort((a,b) => (b.year*12+b.month) - (a.year*12+a.month)).map(a => (
+              <div key={a.key} style={{ padding:16, borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:10 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                  <span style={{ fontSize:16, fontWeight:700 }}>{a.key}</span>
+                  <span style={{ fontSize:16, fontWeight:700, color:t.rd }}>{fmtM(a.total, bCurr)}</span>
+                </div>
+                <div style={{ fontSize:12, color:t.sc, marginBottom:8 }}>{a.exps.length} transactions</div>
+                {a.exps.slice(0, 5).map(e => {
+                  const c = cats.find(x => x.name === e.category) || DEF_CATS.find(x => x.name === e.category);
+                  return (
+                    <div key={e.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 0", borderTop:"1px solid "+t.bd, fontSize:13 }}>
+                      <span>{c?.emoji || "💰"}</span>
+                      <span style={{ flex:1 }}>{e.desc}</span>
+                      <span style={{ color:t.rd, fontWeight:600 }}>{fmtM(e.convAmt, bCurr)}</span>
+                    </div>
+                  );
+                })}
+                {a.exps.length > 5 && <div style={{ fontSize:12, color:t.sc, textAlign:"center", padding:"8px 0" }}>+{a.exps.length - 5} more</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* SIGN IN MODAL */}
       {showLogin && (
         <div style={{...modBg, alignItems:"center"}} onClick={e => e.target === e.currentTarget && setShowLogin(false)}>
@@ -1251,7 +1286,7 @@ export default function BudgetTrackerV2() {
             <div style={{ display:"flex", alignItems:"center", gap:12, margin:"6px 0 14px" }}>
               <div style={{ flex:1, height:1, background:t.bd }} /><span style={{ fontSize:11, color:t.sc }}>or</span><div style={{ flex:1, height:1, background:t.bd }} />
             </div>
-            <button onClick={async () => { await doGoogle(); if (auth.currentUser) { setShowLogin(false); } }} style={{ width:"100%", padding:"12px 16px", borderRadius:14, background:t.al, border:"1px solid "+t.bd, color:t.tx, fontSize:14, fontWeight:600, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+            <button onClick={() => doGoogle()} style={{ width:"100%", padding:"12px 16px", borderRadius:14, background:t.al, border:"1px solid "+t.bd, color:t.tx, fontSize:14, fontWeight:600, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
               <span style={{ fontSize:16 }}>G</span> Continue with Google
             </button>
             <div style={{ textAlign:"center", marginTop:14 }}>
