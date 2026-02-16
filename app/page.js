@@ -382,59 +382,102 @@ export default function BudgetTrackerV2() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { alert("Voice not supported. Try Chrome on Android, or Safari 14.1+ on iPhone!"); return; }
     const r = new SR();
-    r.continuous = false;
-    r.interimResults = false;
+    r.continuous = true;
+    r.interimResults = true;
     r.lang = "en-US";
     r.maxAlternatives = 3;
-    r.onstart = () => setListening(true);
-    r.onresult = ev => {
-      const transcript = ev.results[0][0].transcript.toLowerCase().trim();
-      setListening(false);
-      console.log("Voice heard:", transcript);
+    let finalTranscript = "";
+    let hasResult = false;
+    let stopTimer = null;
 
-      // Try multiple number patterns
-      const amtMatch = transcript.match(/(\d+[\.,]?\d*)/);
-      // Also try word numbers
-      const wordNums = { one:1, two:2, three:3, four:4, five:5, six:6, seven:7, eight:8, nine:9, ten:10, fifteen:15, twenty:20, twenty5:25, thirty:30, forty:40, fifty:50, hundred:100 };
-      let amt = amtMatch ? parseFloat(amtMatch[1].replace(",", ".")) : 0;
-      if (amt === 0) {
-        for (const [w, n] of Object.entries(wordNums)) {
-          if (transcript.includes(w)) { amt = n; break; }
+    r.onstart = () => {
+      setListening(true);
+      // Auto-stop after 8 seconds if no final result
+      stopTimer = setTimeout(() => {
+        r.stop();
+      }, 8000);
+    };
+
+    r.onresult = ev => {
+      hasResult = true;
+      finalTranscript = "";
+      let interimTranscript = "";
+      for (let i = 0; i < ev.results.length; i++) {
+        if (ev.results[i].isFinal) {
+          finalTranscript += ev.results[i][0].transcript;
+        } else {
+          interimTranscript += ev.results[i][0].transcript;
         }
       }
+      // Use final if available, otherwise use interim
+      const transcript = (finalTranscript || interimTranscript).toLowerCase().trim();
+      if (!transcript) return;
 
-      let foundCat = "";
-      const currentCats = cats;
-      for (const c of currentCats) { if (transcript.includes(c.name.toLowerCase())) { foundCat = c.name; break; } }
-      if (!foundCat) {
-        const kw = { Food:["food","lunch","dinner","breakfast","coffee","groceries","eat","snack","meal","restaurant","pizza","burger","chicken","rice"],Transport:["uber","taxi","bus","gas","fuel","ride","train","metro","lyft","bolt","careem"],Housing:["rent","mortgage"],Entertainment:["movie","netflix","game","concert","spotify","youtube"],Shopping:["shop","buy","bought","amazon","clothes","shoes","zara","nike"],Health:["doctor","medicine","gym","pharmacy","hospital"],Utilities:["bill","internet","phone","electric","water","wifi"],Education:["book","course","school","tuition"],Travel:["flight","hotel","trip","travel","vacation","airbnb"] };
-        for (const [k, ws] of Object.entries(kw)) if (ws.some(w => transcript.includes(w)) && currentCats.find(c => c.name === k)) { foundCat = k; break; }
-      }
-      if (!foundCat) foundCat = "Other";
-
-      let desc = transcript.replace(/[\d,\.]+/, "").replace(foundCat.toLowerCase(), "").replace(/\b(dollar|dollars|pound|pounds|euro|euros|dirham|dirhams|spent|spend|paid|pay|for|on|at)\b/gi, "").trim();
-      if (!desc || desc.length < 2) desc = transcript;
-
-      if (amt > 0) {
-        const newExp = { id: Date.now(), amt, cur: bCurr, convAmt: amt, desc: desc.charAt(0).toUpperCase()+desc.slice(1), category: foundCat, date: new Date().toISOString(), taxDeduct: false };
-        if (bizMode) setBizExps(p => [newExp, ...p]); else setExps(p => [newExp, ...p]);
-        setShowAdd(false);
-      } else {
-        // No amount found — fill in what we got so user can add amount manually
-        setEDesc(desc.charAt(0).toUpperCase()+desc.slice(1));
-        if (foundCat) setECat(foundCat);
-        setEAmt("");
+      // If we have a final result, process it
+      if (finalTranscript) {
+        if (stopTimer) clearTimeout(stopTimer);
+        r.stop();
+        processVoice(transcript);
       }
     };
+
     r.onerror = (e) => {
       console.log("Speech error:", e.error);
+      if (stopTimer) clearTimeout(stopTimer);
       setListening(false);
-      if (e.error === "not-allowed") alert("Mic access denied. Check your browser permissions.");
-      if (e.error === "no-speech") alert("No speech detected. Try speaking louder or closer to the mic.");
+      if (e.error === "not-allowed") alert("Mic access denied. Go to Settings → Safari → Microphone → Allow");
+      else if (e.error === "no-speech") alert("No speech detected. Speak louder or closer to mic.");
     };
-    r.onend = () => setListening(false);
+
+    r.onend = () => {
+      if (stopTimer) clearTimeout(stopTimer);
+      setListening(false);
+      // If we only got interim results (iPhone issue), process them
+      if (!hasResult) return;
+      if (!finalTranscript) {
+        // Fallback: grab whatever we last heard
+        const last = finalTranscript || "";
+        if (last) processVoice(last.toLowerCase().trim());
+      }
+    };
+
     recRef.current = r;
     r.start();
+  };
+
+  const processVoice = (transcript) => {
+    console.log("Voice heard:", transcript);
+
+    const amtMatch = transcript.match(/(\d+[\.,]?\d*)/);
+    const wordNums = { one:1, two:2, three:3, four:4, five:5, six:6, seven:7, eight:8, nine:9, ten:10, eleven:11, twelve:12, fifteen:15, twenty:20, "twenty five":25, thirty:30, forty:40, fifty:50, sixty:60, seventy:70, eighty:80, ninety:90, hundred:100 };
+    let amt = amtMatch ? parseFloat(amtMatch[1].replace(",", ".")) : 0;
+    if (amt === 0) {
+      for (const [w, n] of Object.entries(wordNums)) {
+        if (transcript.includes(w)) { amt = n; break; }
+      }
+    }
+
+    let foundCat = "";
+    const currentCats = cats;
+    for (const c of currentCats) { if (transcript.includes(c.name.toLowerCase())) { foundCat = c.name; break; } }
+    if (!foundCat) {
+      const kw = { Food:["food","lunch","dinner","breakfast","coffee","groceries","eat","snack","meal","restaurant","pizza","burger","chicken","rice"],Transport:["uber","taxi","bus","gas","fuel","ride","train","metro","lyft","bolt","careem"],Housing:["rent","mortgage"],Entertainment:["movie","netflix","game","concert","spotify","youtube"],Shopping:["shop","buy","bought","amazon","clothes","shoes","zara","nike"],Health:["doctor","medicine","gym","pharmacy","hospital"],Utilities:["bill","internet","phone","electric","water","wifi"],Education:["book","course","school","tuition"],Travel:["flight","hotel","trip","travel","vacation","airbnb"] };
+      for (const [k, ws] of Object.entries(kw)) if (ws.some(w => transcript.includes(w)) && currentCats.find(c => c.name === k)) { foundCat = k; break; }
+    }
+    if (!foundCat) foundCat = "Other";
+
+    let desc = transcript.replace(/[\d,\.]+/, "").replace(foundCat.toLowerCase(), "").replace(/\b(dollar|dollars|pound|pounds|euro|euros|dirham|dirhams|spent|spend|paid|pay|for|on|at)\b/gi, "").trim();
+    if (!desc || desc.length < 2) desc = transcript;
+
+    if (amt > 0) {
+      const newExp = { id: Date.now(), amt, cur: bCurr, convAmt: amt, desc: desc.charAt(0).toUpperCase()+desc.slice(1), category: foundCat, date: new Date().toISOString(), taxDeduct: false };
+      if (bizMode) setBizExps(p => [newExp, ...p]); else setExps(p => [newExp, ...p]);
+      setShowAdd(false);
+    } else {
+      setEDesc(desc.charAt(0).toUpperCase()+desc.slice(1));
+      if (foundCat) setECat(foundCat);
+      setEAmt("");
+    }
   };
 
   // Receipt photo (reference only)
