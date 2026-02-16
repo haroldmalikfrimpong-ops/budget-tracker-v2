@@ -385,33 +385,53 @@ export default function BudgetTrackerV2() {
     r.continuous = false;
     r.interimResults = false;
     r.lang = "en-US";
+    r.maxAlternatives = 3;
     r.onstart = () => setListening(true);
     r.onresult = ev => {
-      const transcript = ev.results[0][0].transcript.toLowerCase();
+      const transcript = ev.results[0][0].transcript.toLowerCase().trim();
       setListening(false);
-      // Parse the voice input
-      const amtMatch = transcript.match(/(\d+\.?\d*)/);
-      const amt = amtMatch ? parseFloat(amtMatch[1]) : 0;
+      console.log("Voice heard:", transcript);
+
+      // Try multiple number patterns
+      const amtMatch = transcript.match(/(\d+[\.,]?\d*)/);
+      // Also try word numbers
+      const wordNums = { one:1, two:2, three:3, four:4, five:5, six:6, seven:7, eight:8, nine:9, ten:10, fifteen:15, twenty:20, twenty5:25, thirty:30, forty:40, fifty:50, hundred:100 };
+      let amt = amtMatch ? parseFloat(amtMatch[1].replace(",", ".")) : 0;
+      if (amt === 0) {
+        for (const [w, n] of Object.entries(wordNums)) {
+          if (transcript.includes(w)) { amt = n; break; }
+        }
+      }
+
       let foundCat = "";
       const currentCats = cats;
       for (const c of currentCats) { if (transcript.includes(c.name.toLowerCase())) { foundCat = c.name; break; } }
       if (!foundCat) {
-        const kw = { Food:["food","lunch","dinner","breakfast","coffee","groceries","eat","snack","meal","restaurant"],Transport:["uber","taxi","bus","gas","fuel","ride","train"],Housing:["rent","mortgage"],Entertainment:["movie","netflix","game","concert"],Shopping:["shop","buy","bought","amazon","clothes"],Health:["doctor","medicine","gym","pharmacy"],Utilities:["bill","internet","phone","electric","water"],Education:["book","course","school","tuition"],Travel:["flight","hotel","trip","travel","vacation"] };
+        const kw = { Food:["food","lunch","dinner","breakfast","coffee","groceries","eat","snack","meal","restaurant","pizza","burger","chicken","rice"],Transport:["uber","taxi","bus","gas","fuel","ride","train","metro","lyft","bolt","careem"],Housing:["rent","mortgage"],Entertainment:["movie","netflix","game","concert","spotify","youtube"],Shopping:["shop","buy","bought","amazon","clothes","shoes","zara","nike"],Health:["doctor","medicine","gym","pharmacy","hospital"],Utilities:["bill","internet","phone","electric","water","wifi"],Education:["book","course","school","tuition"],Travel:["flight","hotel","trip","travel","vacation","airbnb"] };
         for (const [k, ws] of Object.entries(kw)) if (ws.some(w => transcript.includes(w)) && currentCats.find(c => c.name === k)) { foundCat = k; break; }
       }
       if (!foundCat) foundCat = "Other";
-      let desc = transcript.replace(/\d+\.?\d*/, "").replace(foundCat.toLowerCase(), "").trim();
-      if (!desc) desc = transcript;
+
+      let desc = transcript.replace(/[\d,\.]+/, "").replace(foundCat.toLowerCase(), "").replace(/\b(dollar|dollars|pound|pounds|euro|euros|dirham|dirhams|spent|spend|paid|pay|for|on|at)\b/gi, "").trim();
+      if (!desc || desc.length < 2) desc = transcript;
+
       if (amt > 0) {
         const newExp = { id: Date.now(), amt, cur: bCurr, convAmt: amt, desc: desc.charAt(0).toUpperCase()+desc.slice(1), category: foundCat, date: new Date().toISOString(), taxDeduct: false };
         if (bizMode) setBizExps(p => [newExp, ...p]); else setExps(p => [newExp, ...p]);
         setShowAdd(false);
       } else {
-        setEDesc(desc);
+        // No amount found — fill in what we got so user can add amount manually
+        setEDesc(desc.charAt(0).toUpperCase()+desc.slice(1));
         if (foundCat) setECat(foundCat);
+        setEAmt("");
       }
     };
-    r.onerror = (e) => { console.log("Speech error:", e.error); setListening(false); };
+    r.onerror = (e) => {
+      console.log("Speech error:", e.error);
+      setListening(false);
+      if (e.error === "not-allowed") alert("Mic access denied. Check your browser permissions.");
+      if (e.error === "no-speech") alert("No speech detected. Try speaking louder or closer to the mic.");
+    };
     r.onend = () => setListening(false);
     recRef.current = r;
     r.start();
