@@ -1,22 +1,26 @@
 export const metadata = {
-  title: "Budget Tracker",
+  title: "Your Budget Tracker",
   description: "Smart. Simple. Secure.",
-  manifest: "/manifest.json",
-  themeColor: "#0a0a0f",
-  viewport: "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no",
+  themeColor: "#6C63FF",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "YBT",
+  },
 };
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        <link rel="apple-touch-icon" href="/icon-192.png" />
+        <meta name="apple-mobile-web-app-title" content="YBT" />
+        <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABtElEQVR4nO2Xv0sCYRjHv/fWdMIp9GMRbPEvkC6MiCTDpX8gHUJ0FcSgxTEClwiUHJUjjKMpQkKEtgYdDG1zqCDHFq/hhKvhGuQuOw56z+s8gr7Lve/D8Xw/73PP+3IvAxNl0mrALG5XZxVmYIwxkxOW9apOGBs1Gr3pvmTW5kYvMmtzIwT56UWnRZxqOBqxrFd1vwJ2E+zc3bgHoJnbgZgaQDO9Dm2s2IGYnxbgdnN3PJAlfZyKS0EAqIq+R9o8liqQiktBzeS3RFUBq6ZWKvH3t6HrAB6P78VVALtiMmk1UBXtrcKOXK8ANUCjUUc0ug1BqCCR2EOhcAxZljAYPGE4fIUsS5BlCcnkvjMAudwhyuUS/H4/RPFSj3Mch1BoDa1WGzy/DkE4twRAfRT3+330eg+o1S6gquMfqGz2ADy/ikhky5LppCz1gKIoUJR3fV4sniIW20Gncz81APUuSMUlEAaYIwAh359msaOSjwqA+hNUxa+E+fzJc7N5tRgORyTfwvIHAHS7ba5eF5do82n6PwcYwJ17ATC+IbleAaKRzNpY8yTGwCzNAcPtWJNTPWG2yE95zZWRUySNBAAAAABJRU5ErkJggg==" />
+        <link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAYAAAA9zQYyAAALB0lEQVR4nO3da1BU5xkH8OcsBHVBBUYZQAIRVNSUcdBMqzGdzHTiBOMkfDCQQCdfwJDpZANV4qXV3Ig23h2siTGpTJyGi7d01ksR24yNTDtNI6XeGksrBKqyrAwsS1iQAtsPyTK7e/a+5+zZfc7/N5OMvuf2Lv7n4eHdcxaBwoBWO9Oq9BwgeBbLgKD0HBSZgH2AS4pMGUrMAeRTUx/fSaRMwEN2QVuInQNse/HAh6t/41CFW9aLuAoxAqw+zv/+coZblhM7BxkhBhv7TMgRbMlPqNXOtCLI4I0tI4eOCl1SnleyQCPIEAipgy1JoG1hRpAhUCVFpgwpQh1UoFGVQUpSVOuAA42qDHIJplprAjkIYQY51dTHd+pKremBHOt3oBFmCIVAQ+1XoBFmCKVAQu1zoBFmUIK/ofYp0AgzKMmfUHsNNMIM4cDXUHtdttOVWtMRZggX3u7/8FihceM9hBtvVdptoNFqQDjy1nq4Ld9oNSCcuWs9XFZotBoQ7txVaVGg0WpAJHDXegR0LwdAuHIINKozRBJXVRoVGlhx+EkRKxsQiexXPCYrNFY2IFLZtx1oOYCVyVKNdgMima3t0BCh3YDIZ2s70HIAKwg0sCIQoX8GHiyWAUGD/hm40JVa09FyACsINLCCQAMrCDSwgkADKwg0sIJAAysIdIg81Xxe6SmoAgIdArYwI9TyQ6CBFQRaZs5VGVVaXgi0jNyFF6GWDwItE2+hRajlgUADKwi0DHytvqjS0kOgJeZvSBFqaSHQEgo0nAi1dBBoYAWBlkiwVRZVWhoItASkCiNCHTwEOkhShxChDg4CLSP90pUZ+qUrM5Seh5og0EHwVE3tg+xvqFGlA4dAB0ju0CHUgYlWegKR6o8/XuN5hyFT8OcAv6FCAysINLCCliMClRSZ5rnbVlMf/59QziXcoEJHGE9h9mU7dwg0sIJAAyuq76HRj/Ki6gqNfpQfVQca+FF9y6EG7r7TcGypUKGZ89Q2cWypEGhgBYEGVlj20GrqGcERuwqttp4RHLELNKgbAg2sINDACgINrCDQwAoCDawg0MAKAg2sINDACgItk9jY+E7bn/P//udO5+34kBl5sLyXI1zYhxpCAxUaWEGggRUEGlhBoIEVBBpYQaCBFXaB9vSYlfM2b49kheMjW/7O2Z+vBweCVjvTWlJkyqipx5opRLaSIlMGuwoN6oZAAysINLCCQAMrCDSwgkADKwg0sIJAAysINLCCQAMrCDSwgkADKwg0sIJAAyuq+BiDGTNmUEvLl5SamuIw3tfXR7m5P6Te3l63x86aNYtaW/9GiYmJDuN3796jxx5bTmazmQoK1tInnxz1OIcHDx6QxWIhg6GH2tr+TV98cZlOn/6dy2tfv95KmZlz/XiF7tXW1lNZ2c8kOVckUEWFNpvNpNNViMYTExNpz56dHo/du3eXKMxERDpdBZnNZp/nMGXKFEpISKBFixZSfv6ztH//Hrp58yqVla3z+RzgnSoCTUTU1HSRamvrReOFhc9TXt7TLo/Jy3uaCgrWisY//bSOLl78Q9BziouLpQMH9lJh4fNBnwu+o5pAExFt3LiFursNovHq6v0UFxfnMBYXF0fV1ftF+3Z3G2jTpl9IOq+tW6U9n5qpKtADAwP02ms/F42npc2hqqq3HMbeffdtSkubI9pXp6uggYEBn663YMFiio2Np9jYeEpKSqXVq5+ljo5vRPvNm5dFycnJk3/PycmdPM75v6+/viU6/tix37rdX039M5HKAk1E1Nh4gRoajovGy8rW0fLlPyIiohUrltPLL5eK9qmvb6ALF5oCuu7QkIUuX26mqqodLrcnJiYEdF5wpLpAExFVVm6mnp4ehzFBEOiDDw7S9OnT6f33q0kQBIftBoOBXn99i2xzMhrvy3ZuNVFloE0mE5WXrxeNZ2dnU3PzJcrOzhZtKy9fTyaTKeBrarXT6IknHqc33vilaNuVKy0elw7Bd6pYh3bl3Lnf04kTJ6mwsMBhfP588S+bPX78BJ0/3+j3Ndra/ul1n6EhC1VWbvL73OCaKiu0zYYNm8hoNHrcx2g0UmXlZlmuf/36DXryyZ/QlSstspxfjVQd6P7+fqqo2OBxn4qKDdTf3y/L9XNyfkDvvbedUlKSve8MPlF1oImIzpw5R6dOfeZy28mTp+nMmXOyXn/VqqeosfEcxcfHy3odtVB9oImIDh8+4nL8ww8/Cuq89uvQCQlJlJOTS7t37yWr1eqw3/z580inU9d6sVwQaCKamJjwazwQo6Oj1N7eQe+8s53q6hpE2194oVCya6kZAq2Aa9euicbS0x+mqKgoBWbDCwKtgCVLlojGoqKiRG/mgP9Uuw4dajExMZSWNodeeumnVFz8omj7nTt3aWxsTIGZ8YJAy8iXN1Zs5F5NUQu0HGGgu9tAO3fuVnoaLCDQCvvqqyu0alUe9fX1KT0VFtByhNDIyAgNDg5SR8c31Nr6Dzp79jxduvQnpafFCn7HCrCB37EC7CDQwAr7HrqkyDT5Z9v7FsL3/xO8jPuyj/O4x31CdR03429XxxN3qNDACvsKXVMfr/QUIIRQoYEVBBpYQaCBFQQaWEGggRX2qxyBWLgwZ6iwcJ1hYmJCaGu7qT1x4jeTj2Xn5q4wDw2Zo9vabmqTklJGH3106beXLp1PtD9udPSBxmC4E9PYeGp2T8+9GNuxGo3G+swzhb2LFy/5dupU7cTt27e0tbWHU5yvS0Q0NDQYtW/ftkc0Go1127YD7fbza2j4KKWt7aZW/q9E5EGg3dDr65Ju3boWW1xc1h0d/ZB1bOx/Pj1OotfXJd240RL3yCPzhvPy1vYeO/brVNu23NwVg2Njo8LBg1UZIyPDLr876vV1SVevfjnd9veJiQmhqqoiKzU1/UFW1iJLc3MTPgTPA7QcbuTnFxs3b97ZMThojh4fH7MLs5WIhO8f2xZET3ATEY2Pjwm3b9/SOj9kO3t28mhLy19mjIwMa7Zu3df+6qtbu1xd9803q2+/8sqm/0r6glQCgXZDr69L2r59febIyLAmIyNr2DY+ODgQPXfu/OHo6IesmZkLLIODA6LvclFR0dasrIUWjcbxy3v/viFm2bLHzVOnTpvYtWvL3N5eY4zzsXp9XVJVVUXWkSO7H5blhTGHlsON/Pxi43PPvWjs7r4z5fPPz07+Tor29n9NW7ZspXnjxl913LvXNbWh4eNk5+NWr17bazDcjWlsPDnbfltr61+nr1lT0Fte/lbn8PBQVFPTZ7NcXTc/v9g4Pj4m7NhRmSnfK+QJ90MDG7gfGthBoIEVjcUygE83ARYOHRW6UKGBFQ0RUU19fGdJkSlD6ckABMqWX1RoYEVDRIQ+GiLdoaNCFxEqNDAzGWj00RCp7HM7GWi0HRCpbO0GEVoOYMYh0Gg7INI459Uh0Gg7INLYtxtELloOVGmIFK5yKgo0qjRECufqTOTmh8JDR4UuVGkIZ+4KL1Y5gBW3gUaVhnDlqS32WKERagg33n7GQ8sBrHgNNKo0hAtfVuB8qtAINSjN1+Vkn1sOhBqU4s97I3710Ag1hJq/b/T5/UMhQg2hEsi71gGtciDUILdAb8EIeNkOoQa5BHM/kSQ3IulKren4bDwIlhQ3xknyxgqqNQRLqrs8Jb9VFNUa/CH17cqy3PusK7WmE333sIAc54fIV1JkynB1P3OwZL2ZH8EGZ3IF2SZkT6cg3Oold4jtKfK4lS3cRAg4R7YFglCF2F5YPD9oH3CIXEoE2Nn/ATQfHm00mKdyAAAAAElFTkSuQmCC" />
       </head>
-      <body style={{ margin: 0, padding: 0, background: "#0a0a0f" }}>
-        {children}
-      </body>
+      <body style={{ margin: 0, padding: 0 }}>{children}</body>
     </html>
   );
 }
