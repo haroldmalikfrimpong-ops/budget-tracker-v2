@@ -1589,7 +1589,7 @@ export default function BudgetTrackerV2() {
             <div style={{ marginTop:20, padding:"14px 16px", borderRadius:14, background:t.al, border:"1px solid "+t.bd }}>
               <div style={{ fontSize:12, color:t.sc, marginBottom:8 }}>Have a Pro code?</div>
               <div style={{ display:"flex", gap:8 }}>
-                <input style={{ ...inp, flex:1, fontSize:14 }} placeholder="Enter code" value={proCode} onChange={e => setProCode(e.target.value.toUpperCase())} />
+                <input style={{ ...inp, flex:1, fontSize:14, color:"#f0f0f5", background:"#1a1a24", letterSpacing:2 }} placeholder="Enter code" value={proCode} onChange={e => setProCode(e.target.value.toUpperCase())} />
                 <button style={{ ...btn(), padding:"12px 20px", fontSize:14 }} onClick={() => {
                   if (proCode === PRO_CODE) { setIsPro(true); setShowUpgrade(false); setProCode(""); }
                   else { alert("Invalid code"); }
@@ -1618,7 +1618,7 @@ export default function BudgetTrackerV2() {
             <div style={{ marginTop:20, padding:"14px 16px", borderRadius:14, background:t.al, border:"1px solid "+t.bd }}>
               <div style={{ fontSize:12, color:t.sc, marginBottom:8 }}>Have a Business code?</div>
               <div style={{ display:"flex", gap:8 }}>
-                <input style={{ ...inp, flex:1, fontSize:14 }} placeholder="Enter code" value={bizCode} onChange={e => setBizCode(e.target.value.toUpperCase())} />
+                <input style={{ ...inp, flex:1, fontSize:14, color:"#f0f0f5", background:"#1a1a24", letterSpacing:2 }} placeholder="Enter code" value={bizCode} onChange={e => setBizCode(e.target.value.toUpperCase())} />
                 <button style={{ ...btn(), padding:"12px 20px", fontSize:14, background:"linear-gradient(135deg,#f5af19,#f093fb)" }} onClick={() => {
                   if (bizCode === BIZ_CODE) { setIsBiz(true); setIsPro(true); setActiveMode("business"); setBizMode(true); setCats(DEF_BIZ_CATS); setShowBizUpgrade(false); setBizCode(""); }
                   else { alert("Invalid code"); }
