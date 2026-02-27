@@ -70,6 +70,32 @@ const FULL_MO = ["January","February","March","April","May","June","July","Augus
 
 function cnv(a, f, to) { return f === to ? a : (a / RATES[f]) * RATES[to]; }
 
+function formatAmtInput(val) {
+  // Strip everything except digits, dots, and currency symbols
+  let raw = val.replace(/[^0-9.,€£$¥₦د]/g, "");
+  // Preserve currency prefix if any
+  let prefix = "";
+  const prefixMatch = val.match(/^[€£$¥₦]/);
+  if (prefixMatch) prefix = prefixMatch[0];
+  // Get just digits and dot
+  let nums = raw.replace(/[^0-9.]/g, "");
+  // Split on decimal
+  const parts = nums.split(".");
+  // Format the integer part with commas
+  let intPart = parts[0].replace(/^0+(?=\d)/, ""); // strip leading zeros
+  if (!intPart) intPart = "0";
+  intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  // Rebuild
+  let result = prefix + intPart;
+  if (parts.length > 1) result += "." + parts[1].slice(0, 2); // max 2 decimal places
+  return result;
+}
+
+function parseAmt(val) {
+  // Strip commas and parse number
+  return parseFloat(val.replace(/[^0-9.]/g, "")) || 0;
+}
+
 function fmtM(amount, code) {
   const c = CURRENCIES.find(x => x.code === code) || CURRENCIES[0];
   const abs = Math.abs(amount);
@@ -491,8 +517,9 @@ export default function BudgetTrackerV2() {
   const clrReceipt = () => { setRcImg(null); if (fileRef.current) fileRef.current.value=""; if (camRef.current) camRef.current.value=""; };
 
   const addExpense = () => {
-    const d = detectCurrency(eAmt);
-    const a = d.amount || parseFloat(eAmt);
+    const stripped = eAmt.replace(/,/g, "");
+    const d = detectCurrency(stripped);
+    const a = d.amount || parseAmt(stripped);
     if (!a || !eCat) return;
     const cur = d.currency || eCurr;
     const newExp = { id: Date.now(), amt: a, cur, convAmt: cnv(a, cur, bCurr), desc: eDesc || eCat, category: eCat, date: new Date().toISOString(), taxDeduct: bizMode && eIsTax };
@@ -1161,15 +1188,15 @@ export default function BudgetTrackerV2() {
             )}
 
             <div style={{ display:"flex", gap:10, marginBottom:12 }}>
-              <input style={{ ...inp, flex:1 }} type="text" inputMode="decimal" placeholder="Amount (e.g. €50, £30, $25)" value={eAmt} onChange={e => {
+              <input style={{ ...inp, flex:1 }} type="text" inputMode="decimal" placeholder="Amount (e.g. €50, £30, ₦50,000)" value={eAmt} onChange={e => {
                 const v = e.target.value;
-                setEAmt(v);
                 const d = detectCurrency(v);
                 if (d.currency && d.currency !== eCurr) setECurr(d.currency);
+                setEAmt(formatAmtInput(v));
               }} />
               <select style={{ ...inp, width:88, appearance:"auto" }} value={eCurr} onChange={e => setECurr(e.target.value)}>{CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}</select>
             </div>
-            {eCurr !== bCurr && eAmt && <div style={{ fontSize:12, color:t.sc, marginBottom:8, textAlign:"right" }}>{"≈ "+fmtM(cnv(detectCurrency(eAmt).amount || parseFloat(eAmt) || 0, eCurr, bCurr), bCurr)}</div>}
+            {eCurr !== bCurr && eAmt && <div style={{ fontSize:12, color:t.sc, marginBottom:8, textAlign:"right" }}>{"≈ "+fmtM(cnv(detectCurrency(eAmt.replace(/,/g,"")).amount || parseAmt(eAmt) || 0, eCurr, bCurr), bCurr)}</div>}
             <input style={{ ...inp, marginBottom:12 }} placeholder="Description (optional)" value={eDesc} onChange={e => setEDesc(e.target.value)} />
             <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:8, marginBottom:bizMode?8:16 }}>
               {cats.map(cat => (
@@ -1430,12 +1457,12 @@ export default function BudgetTrackerV2() {
             <div style={{ padding:16, borderRadius:14, background:t.al, border:"1px solid "+t.bd, marginBottom:16 }}>
               <input style={{ ...inp, marginBottom:8 }} placeholder="Invoice description" value={iName} onChange={e => setIName(e.target.value)} />
               <div style={{ display:"flex", gap:8, marginBottom:8 }}>
-                <input style={{ ...inp, flex:1 }} type="number" placeholder="Amount" value={iAmt} onChange={e => setIAmt(e.target.value)} />
+                <input style={{ ...inp, flex:1 }} type="text" inputMode="decimal" placeholder="Amount" value={iAmt} onChange={e => setIAmt(formatAmtInput(e.target.value))} />
                 <input style={{ ...inp, flex:1 }} placeholder="Client name" value={iClient} onChange={e => setIClient(e.target.value)} />
               </div>
               <button style={{ ...btn(), opacity:iName&&iAmt?1:0.4 }} onClick={() => {
                 if (!iName || !iAmt) return;
-                setInvoices(p => [{ id: Date.now(), name: iName, amt: parseFloat(iAmt), client: iClient, paid: false, date: new Date().toISOString() }, ...p]);
+                setInvoices(p => [{ id: Date.now(), name: iName, amt: parseAmt(iAmt), client: iClient, paid: false, date: new Date().toISOString() }, ...p]);
                 setIName(""); setIAmt(""); setIClient("");
               }}>Create Invoice</button>
             </div>
@@ -1475,12 +1502,12 @@ export default function BudgetTrackerV2() {
               <span style={{ cursor:"pointer", fontSize:20, color:t.sc }} onClick={() => setShowRevenue(false)}>✕</span>
             </div>
             <div style={{ padding:16, borderRadius:14, background:t.al, border:"1px solid "+t.bd, marginBottom:16 }}>
-              <input style={{ ...inp, marginBottom:8 }} type="number" placeholder="Amount" value={rvAmt} onChange={e => setRvAmt(e.target.value)} />
+              <input style={{ ...inp, marginBottom:8 }} type="text" inputMode="decimal" placeholder="Amount" value={rvAmt} onChange={e => setRvAmt(formatAmtInput(e.target.value))} />
               <input style={{ ...inp, marginBottom:8 }} placeholder="Description (e.g. Client payment)" value={rvDesc} onChange={e => setRvDesc(e.target.value)} />
               <input style={{ ...inp, marginBottom:8 }} placeholder="Source (e.g. Freelance, Sales)" value={rvSrc} onChange={e => setRvSrc(e.target.value)} />
               <button style={{ ...btn(), background:"linear-gradient(135deg,"+t.gn+",#43e97b)", opacity:rvAmt?1:0.4 }} onClick={() => {
                 if (!rvAmt) return;
-                setRevenue(p => [{ id: Date.now(), amt: parseFloat(rvAmt), desc: rvDesc || "Revenue", source: rvSrc, date: new Date().toISOString() }, ...p]);
+                setRevenue(p => [{ id: Date.now(), amt: parseAmt(rvAmt), desc: rvDesc || "Revenue", source: rvSrc, date: new Date().toISOString() }, ...p]);
                 setRvAmt(""); setRvDesc(""); setRvSrc("");
               }}>Add Revenue</button>
             </div>
@@ -1645,14 +1672,14 @@ export default function BudgetTrackerV2() {
             <div style={{ padding:16, borderRadius:14, background:t.al, border:"1px solid "+t.bd, marginBottom:16 }}>
               <input style={{ ...inp, marginBottom:8 }} placeholder="Name (e.g. Rent, Netflix)" value={rName} onChange={e => setRName(e.target.value)} />
               <div style={{ display:"flex", gap:8, marginBottom:8 }}>
-                <input style={{ ...inp, flex:1 }} type="number" placeholder="Amount" value={rAmt} onChange={e => setRAmt(e.target.value)} />
+                <input style={{ ...inp, flex:1 }} type="text" inputMode="decimal" placeholder="Amount" value={rAmt} onChange={e => setRAmt(formatAmtInput(e.target.value))} />
                 <select style={{ ...inp, width:100, appearance:"auto" }} value={rCat} onChange={e => setRCat(e.target.value)}>
                   {cats.map(c => <option key={c.name} value={c.name}>{c.emoji} {c.name}</option>)}
                 </select>
               </div>
               <button style={{ ...btn(), opacity:rName&&rAmt?1:0.4 }} onClick={() => {
                 if (!rName || !rAmt) return;
-                setRecurring(p => [...p, { id: Date.now(), name: rName, amt: parseFloat(rAmt), cat: rCat }]);
+                setRecurring(p => [...p, { id: Date.now(), name: rName, amt: parseAmt(rAmt), cat: rCat }]);
                 setRName(""); setRAmt("");
               }}>Add Recurring Expense</button>
             </div>
