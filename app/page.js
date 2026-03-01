@@ -573,32 +573,92 @@ export default function BudgetTrackerV2() {
     return Object.entries(m).sort((a, b) => MO_NAMES.indexOf(a[0]) - MO_NAMES.indexOf(b[0]));
   })();
 
-  // Insights
+  // Last month data for comparison
+  const prevMo = cMo === 0 ? 11 : cMo - 1;
+  const prevYr = cMo === 0 ? cYr - 1 : cYr;
+  const lastMoExps = activeExps.filter(e => { const d = new Date(e.date); return d.getMonth() === prevMo && d.getFullYear() === prevYr; });
+  const lastMoArchived = archive.find(a => a.month === prevMo && a.year === prevYr);
+  const allLastMo = [...lastMoExps, ...(lastMoArchived?.exps || [])];
+  const lastMoTotal = allLastMo.reduce((s, e) => s + e.convAmt, 0);
+  const lastMoCatTotals = {};
+  allLastMo.forEach(e => { lastMoCatTotals[e.category] = (lastMoCatTotals[e.category] || 0) + e.convAmt; });
+  const spendDiff = lastMoTotal > 0 ? ((totSpent - lastMoTotal) / lastMoTotal * 100) : 0;
+
+  // Daily spending array for sparkline
+  const dailySpending = (() => {
+    const days = {};
+    moExps.forEach(e => { const d = new Date(e.date).getDate(); days[d] = (days[d] || 0) + e.convAmt; });
+    const arr = [];
+    for (let i = 1; i <= cDay; i++) arr.push(days[i] || 0);
+    return arr;
+  })();
+
+  // Insights (much richer)
   const insights = (() => {
-    if (moExps.length === 0) return ["📊 Add expenses to get insights!"];
+    if (moExps.length === 0) return [{ icon:"📊", title:"Get Started", text:"Add expenses to get personalized insights!" }];
     const r = [], mp = (cDay / dInMo) * 100;
-    r.push(pct > mp + 10 ? ("⚠️ Overspending: "+pct.toFixed(0)+"% used, "+mp.toFixed(0)+"% of month gone.") : ("✅ On Track: "+pct.toFixed(0)+"% used, "+mp.toFixed(0)+"% of month gone."));
-    const so = Object.entries(catTotals).sort((a,b) => b[1]-a[1]);
-    if (so.length > 0) r.push("🔥 Top: "+(cats.find(c=>c.name===so[0][0])?.emoji||"")+" "+so[0][0]+" at "+fmtM(so[0][1],bCurr));
-    const av = totSpent / cDay, pr = av * dInMo;
-    r.push(pr > budget ? ("💸 Forecast: "+fmtM(pr,bCurr)+" — "+fmtM(pr-budget,bCurr)+" over.") : ("💰 Save "+fmtM(budget-pr,bCurr)+" this month!"));
-    r.push("📈 Daily: "+fmtM(av,bCurr)+"/day vs "+fmtM(budget/dInMo,bCurr)+"/day target.");
+    const av = totSpent / Math.max(cDay, 1), pr = av * dInMo;
+    const dailyBgt = budget / dInMo;
     const lf = dInMo - cDay;
-    if (lf > 0 && remain > 0) r.push("🗓️ "+fmtM(remain,bCurr)+" left for "+lf+" days.");
+
+    // Pace check
+    if (pct > mp + 15) r.push({ icon:"🚨", title:"Overspending Alert", text:"You've used "+pct.toFixed(0)+"% of your budget but only "+mp.toFixed(0)+"% of the month has passed. At this rate you'll spend "+fmtM(pr, bCurr)+" — "+fmtM(pr - budget, bCurr)+" over budget." });
+    else if (pct > mp + 5) r.push({ icon:"⚠️", title:"Slightly Over Pace", text:"Spending is "+pct.toFixed(0)+"% vs "+mp.toFixed(0)+"% of month passed. Keep an eye on it." });
+    else r.push({ icon:"✅", title:"On Track", text:"Great job! "+pct.toFixed(0)+"% spent with "+mp.toFixed(0)+"% of the month gone. You're within budget." });
+
+    // Daily insight
+    r.push({ icon:"📈", title:"Daily Breakdown", text:"You're averaging "+fmtM(av, bCurr)+"/day. Your daily target is "+fmtM(dailyBgt, bCurr)+"/day. "+(av > dailyBgt ? "Try to cut "+fmtM(av - dailyBgt, bCurr)+"/day to stay on budget." : "You're "+fmtM(dailyBgt - av, bCurr)+"/day under target!") });
+
+    // Top category
+    const so = Object.entries(catTotals).sort((a,b) => b[1]-a[1]);
+    if (so.length > 0) {
+      const topPct = ((so[0][1] / totSpent) * 100).toFixed(0);
+      r.push({ icon:"🔥", title:"Biggest Expense", text:(cats.find(c=>c.name===so[0][0])?.emoji||"")+" "+so[0][0]+" is your top category at "+fmtM(so[0][1], bCurr)+" ("+topPct+"% of total spending)." });
+    }
+
+    // Last month comparison
+    if (lastMoTotal > 0) {
+      const dir = totSpent > lastMoTotal ? "more" : "less";
+      const diffAmt = Math.abs(totSpent - lastMoTotal);
+      r.push({ icon: totSpent > lastMoTotal ? "📊" : "🎉", title:"vs Last Month", text:"You've spent "+fmtM(totSpent, bCurr)+" so far vs "+fmtM(lastMoTotal, bCurr)+" total last month. That's "+fmtM(diffAmt, bCurr)+" "+dir+"."+(totSpent < lastMoTotal ? " Keep it up!" : "") });
+
+      // Category shift
+      const lastSo = Object.entries(lastMoCatTotals).sort((a,b) => b[1]-a[1]);
+      if (lastSo.length > 0 && so.length > 0 && lastSo[0][0] !== so[0][0]) {
+        r.push({ icon:"🔄", title:"Category Shift", text:"Last month your top spend was "+(cats.find(c=>c.name===lastSo[0][0])?.emoji||"")+" "+lastSo[0][0]+". This month it's "+(cats.find(c=>c.name===so[0][0])?.emoji||"")+" "+so[0][0]+"." });
+      }
+    }
+
+    // Remaining days
+    if (lf > 0 && remain > 0) {
+      r.push({ icon:"🗓️", title:"Days Left", text:lf+" days remaining with "+fmtM(remain, bCurr)+" left. That's "+fmtM(remain / lf, bCurr)+"/day to stay in budget." });
+    } else if (remain <= 0) {
+      r.push({ icon:"💸", title:"Over Budget", text:"You've exceeded your budget by "+fmtM(Math.abs(remain), bCurr)+". "+lf+" days left in the month." });
+    }
+
+    // Forecast
+    r.push({ icon:"🔮", title:"End of Month Forecast", text: pr > budget ? "At current pace, you'll spend "+fmtM(pr, bCurr)+" by month end — "+fmtM(pr - budget, bCurr)+" over budget." : "On track to spend "+fmtM(pr, bCurr)+" and save "+fmtM(budget - pr, bCurr)+" this month!" });
+
+    // Highest single expense
+    if (moExps.length > 0) {
+      const biggest = moExps.reduce((max, e) => e.convAmt > max.convAmt ? e : max, moExps[0]);
+      r.push({ icon:"💳", title:"Biggest Purchase", text:biggest.desc+" at "+fmtM(biggest.convAmt, bCurr)+" on "+new Date(biggest.date).toLocaleDateString("en",{month:"short",day:"numeric"})+"." });
+    }
+
     return r;
   })();
 
-  // Report
+  // Report (much richer)
   const report = (() => {
     const r = [];
-    r.push("📅 " + FULL_MO[cMo] + " " + cYr + " Report");
-    r.push("💰 Overview\nTotal: "+fmtM(totSpent,bCurr)+"\nBudget: "+fmtM(budget,bCurr)+"\nRemaining: "+fmtM(remain,bCurr)+"\nUsed: "+pct.toFixed(0)+"%");
-    r.push("📊 "+moExps.length+" transactions · "+fmtM(totSpent/Math.max(cDay,1),bCurr)+"/day avg");
-    if (Object.keys(catTotals).length > 0) {
-      r.push("📋 Categories\n" + Object.entries(catTotals).sort((a,b)=>b[1]-a[1]).map(([c,a])=>(cats.find(x=>x.name===c)?.emoji||"")+" "+c+": "+fmtM(a,bCurr)+" ("+((a/totSpent)*100).toFixed(0)+"%)").join("\n"));
-    }
+    const av = totSpent / Math.max(cDay, 1);
+    const pr = av * dInMo;
     const g = pct<50?"A+ 🌟":pct<60?"A 🌟":pct<70?"B+ 👍":pct<80?"B 👍":pct<90?"C 😬":"D 😱";
-    r.push("🏆 Grade: " + g);
+    r.push({ section:"header", title:FULL_MO[cMo]+" "+cYr, grade:g });
+    r.push({ section:"overview", spent:totSpent, budget, remain, pct, txns:moExps.length, dailyAvg:av, forecast:pr });
+    if (lastMoTotal > 0) r.push({ section:"comparison", lastTotal:lastMoTotal, curTotal:totSpent, diff:spendDiff });
+    if (Object.keys(catTotals).length > 0) r.push({ section:"categories", data:Object.entries(catTotals).sort((a,b)=>b[1]-a[1]) });
+    if (dailySpending.length > 0) r.push({ section:"daily", data:dailySpending });
     return r;
   })();
 
@@ -959,9 +1019,59 @@ export default function BudgetTrackerV2() {
             <h2 style={{ fontSize:22, fontWeight:700 }}>Stats</h2>
             {archive.length > 0 && <span style={{ fontSize:13, color:t.ac, cursor:"pointer" }} onClick={() => setShowHistory(true)}>📅 History</span>}
           </div>
-          <div style={{ display:"flex", gap:12, padding:"0 20px", marginBottom:16 }}>
-            <div style={{ ...crd, flex:1, textAlign:"center" }}><div style={{ fontSize:11, color:t.sc }}>TOTAL SPENT</div><div style={{ fontSize:22, fontWeight:700, color:t.rd, marginTop:4 }}>{fmtM(totSpent,bCurr)}</div></div>
+
+          {/* This Month vs Last Month */}
+          <div style={{ display:"flex", gap:12, padding:"0 20px", marginBottom:12 }}>
+            <div style={{ ...crd, flex:1, textAlign:"center" }}><div style={{ fontSize:11, color:t.sc }}>THIS MONTH</div><div style={{ fontSize:22, fontWeight:700, color:t.rd, marginTop:4 }}>{fmtM(totSpent,bCurr)}</div></div>
             <div style={{ ...crd, flex:1, textAlign:"center" }}><div style={{ fontSize:11, color:t.sc }}>REMAINING</div><div style={{ fontSize:22, fontWeight:700, color:remain>=0?t.gn:t.rd, marginTop:4 }}>{fmtM(remain,bCurr)}</div></div>
+          </div>
+
+          {/* Last Month Comparison */}
+          {lastMoTotal > 0 && (
+            <div style={{ padding:"0 20px", marginBottom:16 }}>
+              <div style={{ ...crd, padding:16 }}>
+                <div style={{ fontSize:12, color:t.sc, marginBottom:8 }}>vs {FULL_MO[prevMo]} {prevYr}</div>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <div>
+                    <div style={{ fontSize:14, color:t.sc }}>Last month total</div>
+                    <div style={{ fontSize:20, fontWeight:700 }}>{fmtM(lastMoTotal, bCurr)}</div>
+                  </div>
+                  <div style={{ padding:"8px 14px", borderRadius:20, background:spendDiff<=0?t.gn+"20":t.rd+"20" }}>
+                    <span style={{ fontSize:14, fontWeight:700, color:spendDiff<=0?t.gn:t.rd }}>{spendDiff>0?"↑":"↓"} {Math.abs(spendDiff).toFixed(0)}%</span>
+                  </div>
+                </div>
+                {/* Mini comparison bars */}
+                <div style={{ marginTop:12 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:t.sc, marginBottom:4 }}>
+                    <span>This month</span><span>{fmtM(totSpent, bCurr)}</span>
+                  </div>
+                  <div style={{ width:"100%", height:8, borderRadius:4, background:t.al, marginBottom:6 }}>
+                    <div style={{ height:"100%", borderRadius:4, background:t.ac, width:Math.min((totSpent/Math.max(lastMoTotal,budget))*100,100)+"%", transition:"width 0.5s" }} />
+                  </div>
+                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:t.sc, marginBottom:4 }}>
+                    <span>Last month</span><span>{fmtM(lastMoTotal, bCurr)}</span>
+                  </div>
+                  <div style={{ width:"100%", height:8, borderRadius:4, background:t.al }}>
+                    <div style={{ height:"100%", borderRadius:4, background:t.sc, width:Math.min((lastMoTotal/Math.max(totSpent,budget))*100,100)+"%", transition:"width 0.5s" }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Quick Stats Row */}
+          <div style={{ display:"flex", gap:8, padding:"0 20px", marginBottom:16, overflowX:"auto" }}>
+            {[
+              { label:"Transactions", value:moExps.length, color:t.ac },
+              { label:"Daily Avg", value:fmtM(totSpent/Math.max(cDay,1), bCurr), color:t.wn },
+              { label:"Budget Used", value:pct.toFixed(0)+"%", color:pct>85?t.rd:pct>65?t.wn:t.gn },
+              { label:"Days Left", value:dInMo-cDay, color:t.ac },
+            ].map(s => (
+              <div key={s.label} style={{ ...crd, minWidth:100, flex:1, textAlign:"center", padding:"12px 8px" }}>
+                <div style={{ fontSize:10, color:t.sc, marginBottom:4 }}>{s.label}</div>
+                <div style={{ fontSize:18, fontWeight:700, color:s.color }}>{s.value}</div>
+              </div>
+            ))}
           </div>
 
           {/* Category bars */}
@@ -970,17 +1080,25 @@ export default function BudgetTrackerV2() {
               <span style={{ fontSize:16, fontWeight:600 }}>Spending by Category</span>
               <span style={{ fontSize:13, color:t.ac, cursor:"pointer" }} onClick={() => setShowCht(true)}>Charts →</span>
             </div>
-            {Object.entries(catTotals).sort((a,b) => b[1]-a[1]).slice(0,5).map(([ct, am]) => {
+            {Object.entries(catTotals).sort((a,b) => b[1]-a[1]).slice(0,6).map(([ct, am]) => {
               const co = cats.find(c => c.name === ct);
               const p = totSpent > 0 ? (am/totSpent)*100 : 0;
+              const lastAm = lastMoCatTotals[ct] || 0;
+              const catDiff = lastAm > 0 ? ((am - lastAm) / lastAm * 100) : 0;
               return (
-                <div key={ct} style={{ marginBottom:10 }}>
+                <div key={ct} style={{ marginBottom:12 }}>
                   <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
                     <span style={{ fontSize:13 }}>{co?.emoji} {ct}</span>
-                    <span style={{ fontSize:13, fontWeight:600 }}>{fmtM(am,bCurr)}</span>
+                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      {lastAm > 0 && <span style={{ fontSize:10, color:catDiff<=0?t.gn:t.rd }}>{catDiff>0?"↑":"↓"}{Math.abs(catDiff).toFixed(0)}%</span>}
+                      <span style={{ fontSize:13, fontWeight:600 }}>{fmtM(am,bCurr)}</span>
+                    </div>
                   </div>
-                  <div style={{ width:"100%", height:8, borderRadius:4, background:t.al }}>
-                    <div style={{ height:"100%", borderRadius:4, background:co?.color||t.ac, width:p+"%", transition:"width 0.5s" }} />
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <div style={{ flex:1, height:10, borderRadius:5, background:t.al }}>
+                      <div style={{ height:"100%", borderRadius:5, background:"linear-gradient(90deg,"+(co?.color||t.ac)+","+(co?.color||t.ac)+"99)", width:p+"%", transition:"width 0.5s" }} />
+                    </div>
+                    <span style={{ fontSize:11, color:t.sc, minWidth:32, textAlign:"right" }}>{p.toFixed(0)}%</span>
                   </div>
                 </div>
               );
@@ -992,10 +1110,10 @@ export default function BudgetTrackerV2() {
           <div style={{ padding:"0 20px" }}>
             <div style={{ fontSize:16, fontWeight:600, marginBottom:10 }}>Explore</div>
             {[
-              { l:"All Transactions", d:"Complete history", e:"📋", a:() => setShowTxn(true) },
+              { l:"All Transactions", d:moExps.length+" this month", e:"📋", a:() => setShowTxn(true) },
               { l:"Charts & Graphs", d:"Visual breakdown", e:"📊", a:() => setShowCht(true) },
-              { l:"AI Insights", d:"Smart predictions", e:"🤖", a:() => setShowIns(true) },
-              { l:"Monthly Report", d:"Grade & breakdown", e:"📑", a:() => setShowRep(true) },
+              { l:"AI Insights", d:insights.length+" insights available", e:"🤖", a:() => setShowIns(true) },
+              { l:"Monthly Report", d:"Grade & full breakdown", e:"📑", a:() => setShowRep(true) },
             ].map(x => (
               <div key={x.l} onClick={x.a} style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 16px", borderRadius:14, background:t.cd, border:"1px solid "+t.bd, marginBottom:8, cursor:"pointer" }}>
                 <div style={{ width:42, height:42, borderRadius:12, background:t.ac+"22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>{x.e}</div>
@@ -1243,19 +1361,98 @@ export default function BudgetTrackerV2() {
           <div style={sheet}>
             <div style={handle} />
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-              <h3 style={{ fontSize:20, fontWeight:700 }}>Charts</h3>
+              <h3 style={{ fontSize:20, fontWeight:700 }}>📊 Charts & Graphs</h3>
               <span style={{ cursor:"pointer", fontSize:20, color:t.sc }} onClick={() => setShowCht(false)}>✕</span>
             </div>
             <div style={{ display:"flex", gap:8, marginBottom:16 }}>
-              {[["category","Category"],["week","Week"],["month","Month"]].map(([id,lb]) => (
+              {[["category","Category"],["week","Weekly"],["month","Monthly"],["donut","Breakdown"],["daily","Daily"]].map(([id,lb]) => (
                 <div key={id} onClick={() => setCTab(id)} style={pill(cTab===id)}>{lb}</div>
               ))}
             </div>
-            <div style={{ ...crd, padding:"12px 8px" }}>
-              {cTab === "category" && <Chart data={catChartData} colorFn={(l) => cats.find(c=>c.name===l)?.color || t.ac} />}
-              {cTab === "week" && <Chart data={weekChartData} colorFn={(_,i) => ["#6C63FF","#4facfe","#43e97b","#f5af19"][i%4]} />}
-              {cTab === "month" && <Chart data={moChartData} colorFn={(_,i) => ["#f093fb","#6C63FF","#4facfe","#43e97b","#f5af19","#fa709a"][i%6]} />}
-            </div>
+
+            {/* Bar Charts */}
+            {(cTab === "category" || cTab === "week" || cTab === "month") && (
+              <div style={{ ...crd, padding:"16px 12px" }}>
+                {cTab === "category" && <Chart data={catChartData} colorFn={(l) => cats.find(c=>c.name===l)?.color || t.ac} />}
+                {cTab === "week" && <Chart data={weekChartData} colorFn={(_,i) => ["#6C63FF","#4facfe","#43e97b","#f5af19"][i%4]} />}
+                {cTab === "month" && <Chart data={moChartData} colorFn={(_,i) => ["#f093fb","#6C63FF","#4facfe","#43e97b","#f5af19","#fa709a"][i%6]} />}
+              </div>
+            )}
+
+            {/* Donut Chart */}
+            {cTab === "donut" && (
+              <div style={{ ...crd, padding:20 }}>
+                {catChartData.length === 0 ? <div style={{ textAlign:"center", padding:40, color:t.sc }}>No data yet</div> : (
+                  <div>
+                    <div style={{ position:"relative", width:200, height:200, margin:"0 auto 20px" }}>
+                      <svg width="200" height="200" viewBox="0 0 200 200">
+                        {(() => {
+                          let cumPct = 0;
+                          return catChartData.map(([label, val], i) => {
+                            const pctVal = totSpent > 0 ? (val / totSpent) * 100 : 0;
+                            const startAngle = (cumPct / 100) * 360 - 90;
+                            cumPct += pctVal;
+                            const endAngle = (cumPct / 100) * 360 - 90;
+                            const largeArc = pctVal > 50 ? 1 : 0;
+                            const r = 80;
+                            const x1 = 100 + r * Math.cos(startAngle * Math.PI / 180);
+                            const y1 = 100 + r * Math.sin(startAngle * Math.PI / 180);
+                            const x2 = 100 + r * Math.cos(endAngle * Math.PI / 180);
+                            const y2 = 100 + r * Math.sin(endAngle * Math.PI / 180);
+                            const co = cats.find(c => c.name === label)?.color || ["#6C63FF","#4facfe","#43e97b","#f5af19","#fa709a","#f093fb"][i%6];
+                            if (catChartData.length === 1) return <circle key={label} cx="100" cy="100" r={r} fill="none" stroke={co} strokeWidth="32" />;
+                            return <path key={label} d={`M 100 100 L ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} Z`} fill={co} opacity="0.85" />;
+                          });
+                        })()}
+                        <circle cx="100" cy="100" r="50" fill={t.cd} />
+                        <text x="100" y="95" textAnchor="middle" fill={t.tx} fontSize="18" fontWeight="700">{fmtM(totSpent, bCurr)}</text>
+                        <text x="100" y="115" textAnchor="middle" fill={t.sc} fontSize="11">total</text>
+                      </svg>
+                    </div>
+                    {catChartData.map(([label, val], i) => {
+                      const co = cats.find(c => c.name === label)?.color || ["#6C63FF","#4facfe","#43e97b","#f5af19","#fa709a"][i%5];
+                      return (
+                        <div key={label} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
+                          <div style={{ width:12, height:12, borderRadius:3, background:co, flexShrink:0 }} />
+                          <span style={{ flex:1, fontSize:13 }}>{cats.find(c=>c.name===label)?.emoji} {label}</span>
+                          <span style={{ fontSize:13, fontWeight:600 }}>{fmtM(val, bCurr)}</span>
+                          <span style={{ fontSize:11, color:t.sc, minWidth:32 }}>{totSpent>0?((val/totSpent)*100).toFixed(0):0}%</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Daily Spending Sparkline */}
+            {cTab === "daily" && (
+              <div style={{ ...crd, padding:16 }}>
+                {dailySpending.length === 0 ? <div style={{ textAlign:"center", padding:40, color:t.sc }}>No data yet</div> : (
+                  <div>
+                    <div style={{ fontSize:13, color:t.sc, marginBottom:12 }}>Spending per day this month</div>
+                    <div style={{ display:"flex", alignItems:"flex-end", gap:3, height:180, padding:"10px 0" }}>
+                      {dailySpending.map((val, i) => {
+                        const mx = Math.max(...dailySpending);
+                        const h = mx > 0 ? (val / mx) * 140 : 0;
+                        const dailyBgt = budget / dInMo;
+                        return (
+                          <div key={i} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:2 }}>
+                            {val > 0 && <span style={{ fontSize:7, color:t.sc }}>{Math.round(val)}</span>}
+                            <div style={{ width:"100%", height:Math.max(h, 2), borderRadius:"3px 3px 0 0", background:val > dailyBgt ? "linear-gradient(180deg,"+t.rd+","+t.rd+"88)" : "linear-gradient(180deg,"+t.ac+","+t.ac+"88)", transition:"height 0.3s" }} />
+                            <span style={{ fontSize:7, color:t.sc }}>{i+1}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display:"flex", alignItems:"center", gap:12, marginTop:8, justifyContent:"center" }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:4 }}><div style={{ width:10, height:10, borderRadius:2, background:t.ac }} /><span style={{ fontSize:11, color:t.sc }}>Under daily budget</span></div>
+                      <div style={{ display:"flex", alignItems:"center", gap:4 }}><div style={{ width:10, height:10, borderRadius:2, background:t.rd }} /><span style={{ fontSize:11, color:t.sc }}>Over daily budget</span></div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1269,7 +1466,16 @@ export default function BudgetTrackerV2() {
               <h3 style={{ fontSize:20, fontWeight:700 }}>🤖 AI Insights</h3>
               <span style={{ cursor:"pointer", fontSize:20, color:t.sc }} onClick={() => setShowIns(false)}>✕</span>
             </div>
-            {insights.map((x,i) => <div key={i} style={{ padding:16, borderRadius:14, background:t.al, border:"1px solid "+t.bd, marginBottom:10, fontSize:14, lineHeight:1.6 }}>{x}</div>)}
+            <div style={{ fontSize:12, color:t.sc, marginBottom:16 }}>{FULL_MO[cMo]} {cYr} · {insights.length} insights</div>
+            {insights.map((x,i) => (
+              <div key={i} style={{ padding:16, borderRadius:14, background:t.al, border:"1px solid "+t.bd, marginBottom:10 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
+                  <span style={{ fontSize:22 }}>{x.icon}</span>
+                  <span style={{ fontSize:15, fontWeight:700 }}>{x.title}</span>
+                </div>
+                <div style={{ fontSize:13, color:t.sc, lineHeight:1.6, paddingLeft:32 }}>{x.text}</div>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -1283,7 +1489,88 @@ export default function BudgetTrackerV2() {
               <h3 style={{ fontSize:20, fontWeight:700 }}>📑 Monthly Report</h3>
               <span style={{ cursor:"pointer", fontSize:20, color:t.sc }} onClick={() => setShowRep(false)}>✕</span>
             </div>
-            {report.map((x,i) => <div key={i} style={{ padding:16, borderRadius:14, background:t.al, border:"1px solid "+t.bd, marginBottom:10, fontSize:14, lineHeight:1.7, whiteSpace:"pre-line" }}>{x}</div>)}
+            {report.map((r,i) => {
+              if (r.section === "header") return (
+                <div key={i} style={{ textAlign:"center", padding:20, borderRadius:16, background:"linear-gradient(135deg,"+t.ac+"22,"+t.ac+"08)", border:"1px solid "+t.ac+"30", marginBottom:12 }}>
+                  <div style={{ fontSize:14, color:t.sc }}>{r.title}</div>
+                  <div style={{ fontSize:48, margin:"8px 0" }}>{r.grade.split(" ")[1]}</div>
+                  <div style={{ fontSize:28, fontWeight:800, color:t.ac }}>{r.grade.split(" ")[0]}</div>
+                  <div style={{ fontSize:12, color:t.sc, marginTop:4 }}>Budget Score</div>
+                </div>
+              );
+              if (r.section === "overview") return (
+                <div key={i} style={{ ...crd, padding:16, marginBottom:12 }}>
+                  <div style={{ fontSize:14, fontWeight:700, marginBottom:12 }}>💰 Overview</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                    <div style={{ padding:12, borderRadius:10, background:t.al, textAlign:"center" }}>
+                      <div style={{ fontSize:10, color:t.sc }}>Total Spent</div>
+                      <div style={{ fontSize:18, fontWeight:700, color:t.rd }}>{fmtM(r.spent, bCurr)}</div>
+                    </div>
+                    <div style={{ padding:12, borderRadius:10, background:t.al, textAlign:"center" }}>
+                      <div style={{ fontSize:10, color:t.sc }}>Budget</div>
+                      <div style={{ fontSize:18, fontWeight:700 }}>{fmtM(r.budget, bCurr)}</div>
+                    </div>
+                    <div style={{ padding:12, borderRadius:10, background:t.al, textAlign:"center" }}>
+                      <div style={{ fontSize:10, color:t.sc }}>Remaining</div>
+                      <div style={{ fontSize:18, fontWeight:700, color:r.remain>=0?t.gn:t.rd }}>{fmtM(r.remain, bCurr)}</div>
+                    </div>
+                    <div style={{ padding:12, borderRadius:10, background:t.al, textAlign:"center" }}>
+                      <div style={{ fontSize:10, color:t.sc }}>Budget Used</div>
+                      <div style={{ fontSize:18, fontWeight:700, color:r.pct>85?t.rd:r.pct>65?t.wn:t.gn }}>{r.pct.toFixed(0)}%</div>
+                    </div>
+                  </div>
+                  <div style={{ marginTop:12, display:"flex", justifyContent:"space-between", fontSize:12, color:t.sc }}>
+                    <span>{r.txns} transactions</span>
+                    <span>{fmtM(r.dailyAvg, bCurr)}/day avg</span>
+                    <span>Forecast: {fmtM(r.forecast, bCurr)}</span>
+                  </div>
+                </div>
+              );
+              if (r.section === "comparison") return (
+                <div key={i} style={{ ...crd, padding:16, marginBottom:12 }}>
+                  <div style={{ fontSize:14, fontWeight:700, marginBottom:10 }}>📊 vs Last Month</div>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <div><div style={{ fontSize:12, color:t.sc }}>Last month</div><div style={{ fontSize:18, fontWeight:700 }}>{fmtM(r.lastTotal, bCurr)}</div></div>
+                    <div style={{ padding:"6px 12px", borderRadius:16, background:r.diff<=0?t.gn+"20":t.rd+"20" }}>
+                      <span style={{ fontSize:13, fontWeight:700, color:r.diff<=0?t.gn:t.rd }}>{r.diff>0?"↑":"↓"} {Math.abs(r.diff).toFixed(0)}%</span>
+                    </div>
+                    <div style={{ textAlign:"right" }}><div style={{ fontSize:12, color:t.sc }}>This month</div><div style={{ fontSize:18, fontWeight:700 }}>{fmtM(r.curTotal, bCurr)}</div></div>
+                  </div>
+                </div>
+              );
+              if (r.section === "categories") return (
+                <div key={i} style={{ ...crd, padding:16, marginBottom:12 }}>
+                  <div style={{ fontSize:14, fontWeight:700, marginBottom:10 }}>📋 Categories</div>
+                  {r.data.map(([c, a]) => {
+                    const co = cats.find(x => x.name === c);
+                    const p = totSpent > 0 ? (a / totSpent) * 100 : 0;
+                    return (
+                      <div key={c} style={{ marginBottom:10 }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, marginBottom:3 }}>
+                          <span>{co?.emoji} {c}</span>
+                          <span style={{ fontWeight:600 }}>{fmtM(a, bCurr)} ({p.toFixed(0)}%)</span>
+                        </div>
+                        <div style={{ height:6, borderRadius:3, background:t.al }}><div style={{ height:"100%", borderRadius:3, background:co?.color||t.ac, width:p+"%" }} /></div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+              if (r.section === "daily") return (
+                <div key={i} style={{ ...crd, padding:16, marginBottom:12 }}>
+                  <div style={{ fontSize:14, fontWeight:700, marginBottom:10 }}>📈 Daily Spending</div>
+                  <div style={{ display:"flex", alignItems:"flex-end", gap:2, height:80 }}>
+                    {r.data.map((v, j) => {
+                      const mx = Math.max(...r.data);
+                      const h = mx > 0 ? (v / mx) * 60 : 0;
+                      return <div key={j} style={{ flex:1, height:Math.max(h, 1), borderRadius:"2px 2px 0 0", background:v > (budget/dInMo) ? t.rd+"cc" : t.ac+"cc" }} />;
+                    })}
+                  </div>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginTop:4, fontSize:10, color:t.sc }}><span>1st</span><span>{r.data.length}th</span></div>
+                </div>
+              );
+              return null;
+            })}
           </div>
         </div>
       )}
